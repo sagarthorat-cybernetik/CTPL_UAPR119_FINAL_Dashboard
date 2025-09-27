@@ -1,0 +1,6 @@
+scikit-learn
+openpyxl
+pyodbc
+flask
+Flask-Compress
+sqlalchemy

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login | Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: linear-gradient(135deg, #ffffff, #ff6464);
+      color: #fff;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+
+    .login-container {
+      padding: 40px 30px;
+      border-radius: 15px;
+      box-shadow: 0 0 25px rgba(255, 140, 0, 0.4);
+      width: 350px;
+      text-align: center;
+      border: 1px solid #333;
+    }
+
+    .login-container h2 {
+      margin-bottom: 25px;
+      font-size: 24px;
+      color: #ff9933; /* deep saffron */
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      color: #ccc;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #555;
+      outline: none;
+      background: #ffffff;
+      color: #000000;
+      font-size: 14px;
+      transition: border 0.3s;
+    }
+
+    .form-group input:focus {
+      border-color: #ff9933;
+    }
+
+    .login-btn {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: linear-gradient(145deg, #ff0000, #000000c2); /* Red to Black gradient */
+      color: #ffffff;
+      box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+
+    .login-btn:hover {
+      background: #ffa84d;
+    }
+
+    .error-message {
+      margin-top: 15px;
+      color: #ff4d4d;
+      font-size: 14px;
+    }
+
+    .footer {
+      margin-top: 25px;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <h2>Dashboard Login</h2>
+    <form method="POST" action="/login">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" name="username" id="username" required placeholder="Enter username">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" name="password" id="password" required placeholder="Enter password">
+      </div>
+      <button type="submit" class="login-btn">Login</button>
+    </form>
+    {% if error %}
+      <div class="error-message">{{ error }}</div>
+    {% endif %}
+  </div>
+</body>
+</html>

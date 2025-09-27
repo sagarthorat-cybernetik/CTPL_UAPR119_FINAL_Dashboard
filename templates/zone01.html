@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en"> 
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 1 Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <!-- <link rel="stylesheet" href="../static/css/styles.css"> -->
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <div class="title">
+
+            <h2>Zone 1 Report Dashboard</h2>        
+            <h3>Cell Sorting Dashboard</h3>
+        </div>
+        <div class="zones">
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+        </div>
+    </header>
+    <div class="dashboard">
+        <div class="gotomodel">
+            <button id="modeldashboard" onclick="modeldashboard()">Model Dashboard</button>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters">
+            <div class="eachfilter">
+
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime" >
+            </div>
+            <div class="eachfilter">
+
+            <label for="endDateTime">End DateTime:</label>
+            <input type="datetime-local" id="endDateTime" >
+            </div>                
+            <div class="eachfilter">
+
+                <label for="barcode">Barcode:</label>
+                <input type="text" id="barcode" placeholder="Enter Barcode" >
+            </div>
+            <div class="eachfilter">
+                <label>Barley Paper Status:</label>
+                <select id="barleyStatus" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="0">0</option>
+                </select>
+            </div>
+            
+            <div class="eachfilter">
+
+                <label>Capacity Status:</label>
+                <select id="capacityStatus" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="0">0</option>
+                </select>
+            </div>
+            
+            <div class="eachfilter">
+
+                <label>Measurement Status:</label>
+                <select id="measurementStatus" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="0">0</option>
+                </select>
+            </div>
+            
+            <div class="eachfilter">
+
+                <label>Final Status:</label>
+                <select id="finalStatus" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="0">0</option>
+                </select>
+            </div>
+            
+            <div class="eachfilter">
+
+                <label>Grade:</label>
+                <select id="grade" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+            </div>
+        </div>
+        <div class="titletabels">
+            <!-- Export Button -->
+            <button id="searchBtn" class="btn-search">🔍 Search</button>
+            <button id="exportBtn">Download Excel</button>
+        </div>
+        <!-- Logo Progress Loader -->
+        <div id="logoProgress" class="logo-progress" style="display:none;">
+            <img src="../static/images/logo.png" alt="logo">
+            <div class="ring"></div>
+            <!-- <div id="progressText" class="progress-text">0%</div> -->
+        </div>
+        <h1>Statistics</h1>
+        <div class="charts-container">
+            <canvas id="mainPieChart"></canvas>
+            <canvas id="okbarChart"></canvas>
+            <canvas id="ngbarChart"></canvas>
+        </div>        
+        
+        <!-- Tables for Data Counts -->
+        <div class="tables-containers">
+            <!-- OK Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>OK Cells Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total Cells Sorted</td><td id="totalCells">0</td></tr>
+                    <tr><td>Total OK Cells</td><td id="okCells">0</td></tr>
+                    <tr><td>OK Cells Gear-1</td><td id="okCellsG1">0</td></tr>
+                    <tr><td>OK Cells Gear-2</td><td id="okCellsG2">0</td></tr>
+                    <tr><td>OK Cells Gear-3</td><td id="okCellsG3">0</td></tr>
+                    <tr><td>OK Cells Gear-4</td><td id="okCellsG4">0</td></tr>
+                    <tr><td>OK Cells Gear-5</td><td id="okCellsG5">0</td></tr>
+                    <tr><td>OK Cells Gear-6</td><td id="okCellsG6">0</td></tr>
+                </tbody>
+            </table>
+
+            <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>NG Cells Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total NG Cells</td><td id="tngCells">0</td></tr>
+                    <tr><td>Barcode NG Cells</td><td id="bngCells">0</td></tr>
+                    <tr><td>Voltage NG Cells</td><td id="vngCells">0</td></tr>
+                    <tr><td>IR NG Cells</td><td id="ingCells">0</td></tr>
+                    <tr><td>Voltage & IR NG Cells</td><td id="vingCells">0</td></tr>
+                    <tr><td>Capacity NG Cells</td><td id="cngCells">0</td></tr>
+                    <tr><td>Barley Paper NG Cells</td><td id="bpaperngCells">0</td></tr>
+                    <tr><td>Duplicate NG Cells</td><td id="dpngCells">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Filtered Data Table -->
+        <!-- Pagination Info -->
+        <div id="paginationControls" class="pagination-controls">
+            <button id="prevPage">⬅ Prev</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage">Next ➡</button>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        <th>Sr. No</th>
+                        <th>DateTime</th>
+                        <th>Shift</th>
+                        <th>Operator</th>
+                        <th>Cell Position</th>
+                        <th>Cell Barcode</th>
+                        <th>Barley Paper +ve</th>
+                        <th>Barley Paper -ve</th>
+                        <th>Barley Paper Status</th>
+                        <th>Capacity Min</th>
+                        <th>Capacity Max</th>
+                        <th>Capacity Actual</th>
+                        <th>Capacity Status</th>
+                        <th>Voltage Min</th>
+                        <th>Voltage Max</th>
+                        <th>Voltage Actual</th>
+                        <th>Resistance Min</th>
+                        <th>Resistance Max</th>
+                        <th>Resistance Actual</th>
+                        <th>Measurement Status</th>
+                        <th>Final Status</th>
+                        <th>Grade</th>
+                        <th>Fail Reason</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    
+
+    <!-- <script src="../static/js/script.js"></script> -->
+    <script src="{{ url_for('static', filename='./js/script.js') }}"></script>
+</body>
+</html>

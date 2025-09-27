@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 1 Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <div class="title">
+
+            <h2>Zone 1 Dashboard</h2>
+            <h3>Module Formation Dashboard</h3>
+        </div>
+        <div class="zones">
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+        </div>
+    </header>
+    <div class="dashboard">
+        <div class="gotomodel">
+            <button id="celldashboard" onclick="celldashboard()">Cell Dashboard</button>
+        </div>
+
+        
+        <!-- Filters -->
+        <div class="filters">
+            <div class="eachfilter">
+
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime" >
+            </div>
+            <div class="eachfilter">
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime" >
+            </div>
+                
+            <div class="eachfilter">
+                <label for="moduleid">Module ID:</label>
+                <input type="text" id="moduleid" placeholder="Enter Module ID" >
+            </div>
+            
+            <div class="eachfilter">
+
+                <label>Grade:</label>
+                <select id="grade" >
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+            </div>
+        </div>
+        <div class="titletabels">
+            
+            <!-- Search Button -->
+            <button id="searchBtn" class="btn-search">🔍 Search</button>
+            <!-- Export Button -->
+            <button id="exportExcel">Download Excel</button>
+
+        </div>
+        <!-- Logo Progress Loader -->
+        <div id="logoProgress" class="logo-progress" style="display:none;">
+            <img src="../static/images/logo.png" alt="logo">
+            <div class="ring"></div>
+            <!-- <div id="progressText" class="progress-text">0%</div> -->
+        </div>
+        <!-- Tables for Data Counts -->
+        <div class="tables-containers">
+                        <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total</td><td id="total">0</td></tr>
+                </tbody>
+            </table>
+            <!-- OK Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>OK  Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total OK</td><td id="totalok">0</td></tr>
+                </tbody>
+            </table>
+
+            <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total NG</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total NG </td><td id="totalng">0</td></tr>
+                </tbody>
+            </table>
+            <!-- INProgress Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total In Progress</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total In Progress </td><td id="totalinprogress">0</td></tr>
+                </tbody>
+            </table>
+
+        </div>
+        <!-- Filtered Data Table -->
+         <!-- Pagination Info -->
+        <div id="paginationControls" class="pagination-controls">
+            <button id="prevPage">⬅ Prev</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage">Next ➡</button>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        <th>Sr. No</th>
+                        <th>DateTime</th>
+                        <th>Shift</th>
+                        <th>Operator</th>
+                        <th>Module Type</th>
+                        <th>Module Grade</th>
+                        <th>Module ID</th>
+                        <th>Cell ID</th>
+                        <th>Cell Capacity</th>
+                        <th>Cell Voltage</th>
+                        <th>Cell Resistance</th>
+                        <th>Cell Capacity Difference</th>
+                        <th>Cell Voltage Difference</th>
+                        <th>Cell Resistance Difference</th>g
+                        <th>Module Capacity Range</th>
+                        <th>Module Capacity Name</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+
+    </div>
+
+    <!-- <script src="../static/js/script.js"></script> -->
+    <script src="{{ url_for('static', filename='./js/modeldashboard.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 3 Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <link rel="stylesheet" href="../static/css/styles.css">
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body> 
+    <header>
+        <!-- <img src="{{url_for('static', filename='./images/CTPL Logo.bmp')}}" alt=""> -->
+        <!-- <img src="../static/images/logo0.png" class="logo" alt=""> -->
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <h1>Zone 3 Dashboard</h1>
+        <div class="zones">
+            <button id="zone01dashboard" onclick="zone01dashboard()">Zone 01 Dashboard</button>
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+        </div>
+
+    </header>
+    <div class="dashboard">
+        
+        <!-- Filters -->
+        <div class="Stations">
+            <Label><B>Select Your Station:</B></Label>
+            <select name="stationName" id="stationName">
+                <option value="BatteryPackInsertion" selected>Battery Pack Insertion Station</option>
+                <option value="BMS_Conn_Stn">BMS Connection Station</option>
+                <option value="BotmPlate_Tight_Stn">Bottom Plate Tightning Station</option>
+                <option value="EOL_Testing_Station">EOL Testing Station</option>
+                <option value="Housing_Ins_Stn">Housing Insertion Station</option>
+                <option value="HRD_Test_Stn">HRD Testing Station</option>
+                <option value="Laser_Mark_Stn">Laser Mark Station</option>
+                <option value="Leak_Test_Stn">Leak Test Station</option>
+                <!-- <option value="Manual_Housing_Insertion">Manual Housing Insertion Station</option> -->
+                <option value="PCM_Filling_Station">PCM Filling Station</option>
+                <option value="PDI_Station">PDI Station</option>
+                <option value="Top_Cover_Close_Stn">Top Cover Closing Station</option>
+                <option value="TopCover_Attach_Stn">Top Cover Attachment Station</option>
+                <option value="Weighing_Station">Weighing Station</option>
+                <!-- <option value="station8">Engraving on battery pack</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option> -->
+            </select>
+        </div>
+        <div class="filters">
+            <div class="eachfilter">
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime" >
+                <br>
+                <br>
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime">
+            </div>
+                
+            <div class="eachfilter">
+
+                <label for="barcode">Barcode:</label>
+                <input type="text" id="barcode" placeholder="Enter Barcode">
+            </div>
+                          <div class="eachfilter">
+
+                <label>Shift:</label>
+                <select id="shift" >
+                    <option value="">All</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                </select>
+            </div>
+        </div>
+        <div class="titletabels">
+            <!-- Export Button -->
+            <button id="searchBtn" class="btn-search">🔍 Search</button>
+            <button id="exportBtn">Download Excel</button>
+        </div>
+                <!-- Logo Progress Loader -->
+        <div id="logoProgress" class="logo-progress" style="display:none;">
+            <img src="../static/images/logo.png" alt="logo">
+            <div class="ring"></div>
+            <!-- <div id="progressText" class="progress-text">0%</div> -->
+        </div>
+        <!-- Tables for Data Counts -->
+        <div class="tables-containers">
+                        <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total</td><td id="total">0</td></tr>
+                </tbody>
+            </table>
+            <!-- OK Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>OK  Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total OK</td><td id="totalok">0</td></tr>
+                </tbody>
+            </table>
+
+            <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total NG</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total NG </td><td id="totalng">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- Filtered Data Table -->
+        <h2>Filtered Data</h2>
+        <!-- Pagination Info -->
+        <div id="paginationControls" class="pagination-controls">
+            <button id="prevPage">⬅ Prev</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage">Next ➡</button>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                
+            </table>
+        </div>
+
+
+    </div>
+
+    <!-- <script src="../static/js/script.js"></script> -->
+    <script src="{{ url_for('static', filename='./js/zone03.js') }}"></script>
+</body>
+</html>

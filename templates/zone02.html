@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 2 Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <link rel="stylesheet" href="../static/css/styles.css">
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body> 
+    <header>
+        <!-- <img src="{{url_for('static', filename='./images/CTPL Logo.bmp')}}" alt=""> -->
+        <!-- <img src="../static/images/logo.png" class="logo" alt=""> -->
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <h1>Zone 2 Dashboard</h1>
+        <div class="zones">
+            <button id="zone01dashboard" onclick="zone01dashboard()">Zone 01 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+        </div>
+
+    </header>
+    <div class="dashboard">
+        
+        <!-- Filters -->
+        <div class="Stations">
+            <Label><B>Select Your Station:</B></Label>
+            <select name="stationName" id="stationName">
+                <option value="ACIR_Testing_Station" selected>ACIR Testing Station</option>
+                <option value="Bottom_Cell_Holder_Load_Station">Bottom Cell Holder Loading</option>
+                <option value="Laser_Welding_Station">Laser Weldigng Station</option>
+                <option value="Negative_Temp_Check_Station">NTC Assembly and Checking</option>
+                <option value="Polarity_Check_Station">Polarity Check Station</option>
+                <option value="Routing_Station01">Routing Station 01</option>
+                <option value="Routing_Station02">Routing Station 02</option>
+                <option value="Routing_Station03">Routing Station 03</option>
+                <option value="Top_Cell_Holder_Place_Station">TOP Cell Holder Loading & Fitting</option>
+                <option value="Visual_Inspection_Station">Visual Inspection Station</option>
+                <option value="Welding_Fixture_Loading_Station">Welding Fixture & Loading</option>
+                <option value="Wire_Harness_Fixing_Station">Wire Harness Fixing Station</option>
+                <!-- <option value="station8">Engraving on battery pack</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option>
+                <option value="station8">xxxxxxxxxxxxxxxxxxxxx</option> -->
+            </select>
+        </div>
+        <div class="filters">
+            <div class="eachfilter">
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime" >
+                <br>
+                <br>
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime">
+            </div>
+                
+            <div class="eachfilter">
+
+                <label for="barcode">Barcode:</label>
+                <input type="text" id="barcode" placeholder="Enter Barcode">
+            </div>
+               <div class="eachfilter">
+
+                <label>Shift:</label>
+                <select id="shift" >
+                    <option value="">All</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                </select>
+            </div>
+        </div>
+        <div class="titletabels">
+            <!-- Export Button -->
+            <button id="searchBtn" class="btn-search">🔍 Search</button>
+            <button id="exportBtn">Download Excel</button>
+        </div>
+                <!-- Logo Progress Loader -->
+        <div id="logoProgress" class="logo-progress" style="display:none;">
+            <img src="../static/images/logo.png" alt="logo">
+            <div class="ring"></div>
+            <!-- <div id="progressText" class="progress-text">0%</div> -->
+        </div>
+        <!-- Tables for Data Counts -->
+        <div class="tables-containers">
+                        <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total</td><td id="total">0</td></tr>
+                </tbody>
+            </table>
+            <!-- OK Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>OK  Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total OK</td><td id="totalok">0</td></tr>
+                </tbody>
+            </table>
+
+            <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total NG</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total NG </td><td id="totalng">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- Filtered Data Table -->
+        <h2>Filtered Data</h2>
+        <!-- Pagination Info -->
+        <div id="paginationControls" class="pagination-controls">
+            <button id="prevPage">⬅ Prev</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage">Next ➡</button>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                
+            </table>
+        </div>
+
+
+    </div>
+
+    <!-- <script src="../static/js/script.js"></script> -->
+    <script src="{{ url_for('static', filename='./js/zone02.js') }}"></script>
+</body>
+</html>
