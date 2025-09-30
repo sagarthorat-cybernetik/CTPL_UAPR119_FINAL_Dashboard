@@ -336,6 +336,11 @@ def api_cell_dashboard():
 
                 if k.lower() == "date_time":
                     row[k] = format_datetime(v)
+                elif "status" in k.lower():
+                    if str(row[k]) == "0" or str(row[k]) == "2":
+                        row[k]="NG"
+                    else:
+                        row[k]="OK"
                 else:
                     row[k] = format_float(v)
         return jsonify({
@@ -550,8 +555,13 @@ def handle_fetch_module_data():
 
         # round float fields
         for r in rows:
-            for k in ("Cell_Capacity_Actual", "Cell_Voltage_Actual", "Cell_Resistance_Actual"):
-                if r.get(k) is not None:
+            for k in ("Cell_Capacity_Actual", "Cell_Voltage_Actual", "Cell_Resistance_Actual","Status"):
+                if k == "Status":
+                    if str(r.get(k)) =="0" or str(r.get(k))=="2":
+                        r[k]="NG"
+                    else:
+                        r[k]="OK"
+                elif r.get(k) is not None:
                     r[k] = round(float(r[k]), 4)
 
         return jsonify({
@@ -1192,7 +1202,11 @@ def fetch_data_zone02():
             for k, v in row.items():
                 if k.lower() == "datetime":
                     row[k] = format_datetime(v)
-
+                if "status" in k.lower():
+                    if str(row[k]) == "0" or str(row[k]) == "2":
+                        row[k] = "NG"
+                    else:
+                        row[k] = "OK"
                 elif isinstance(v, float):
                     if v == 0.0:
                         continue  # skip formatting 0.0
@@ -1426,7 +1440,11 @@ def fetch_data_zone03():
             for k, v in row.items():
                 if k.lower() == "datetime":
                     row[k] = format_datetime(v)
-
+                if "status" in k.lower():
+                    if str(row[k]) == "0" or str(row[k]) == "2":
+                        row[k] = "NG"
+                    else:
+                        row[k] = "OK"
                 elif isinstance(v, float):
                     if v == 0.0:
                         continue  # skip formatting 0.0
