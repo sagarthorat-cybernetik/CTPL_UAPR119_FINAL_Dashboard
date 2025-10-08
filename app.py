@@ -333,7 +333,7 @@ def api_cell_dashboard():
 
         for row in rows:
             for k, v in row.items():
-
+                # print(k.lower())
                 if k.lower() == "date_time":
                     row[k] = format_datetime(v)
                 elif "status" in k.lower():
@@ -1162,9 +1162,14 @@ def fetch_data_zone02():
         with engine_zone02.connect() as conn:
             total = conn.execute(count_query, params).scalar()
 
-            status_counts = conn.execute(status_query, params).mappings().first() or {}
-            total_ok = status_counts.get("total_ok", 0)
-            total_ng = status_counts.get("total_ng", 0)
+            if station_table == "Tracebility_Table" or station_table == "Cell_Depth_Report":
+                print("non status table")
+                total_ok = "NA"
+                total_ng = "NA"
+            else:
+                status_counts = conn.execute(status_query, params).mappings().first() or {}
+                total_ok = status_counts.get("total_ok", 0)
+                total_ng = status_counts.get("total_ng", 0)
 
             # 🔹 get cursor description to preserve column order
             result = conn.execute(query, {**params, "offset": offset, "limit": limit})
@@ -1271,8 +1276,8 @@ def fetch_data_zone02():
                 "String_Level_IR_Diff_Max_Min", "String_Level_V_Diff_Max_Min",
                 "Module_Level_Resistance", "Status"
             ]
-        print(len(rows))
-        print(total)
+        # print(len(rows))
+        # print(total)
         return jsonify({
             "columns": list(columns),  # 👈 send ordered columns to UI
             "data": rows,
@@ -1319,22 +1324,113 @@ def export_excel_zone02():
             WHERE {where_clause}
             ORDER BY [DateTime] DESC
         """)
+        count_query = text(f"""
+                    SELECT COUNT(*) as total FROM [{station_table}]
+                    WHERE {where_clause}
+                """)
+        # Status counts
+        status_query = text(f"""
+                    SELECT 
+                        SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                        SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
+                    FROM [{station_table}]
+                    WHERE {where_clause}
+                """)
+        if station_table == "Negative_Temp_Check_Station" or station_table == "Polarity_Check_Station":
+            # Count of distinct modules
+            count_query = text(f"""
+                                        SELECT COUNT(ModuleBarcodeData) as total
+                                        FROM [{station_table}]
+                                        WHERE {where_clause}
+                                    """)
+
+            # Module-level OK/NG classification
+            status_query = text(f"""
+                                        SELECT
+                                            SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                            SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng
+                                        FROM (
+                                            SELECT ModuleBarcodeData,
+                                                   MIN(Status01) as min_status,
+                                                   MAX(Status01) as max_status
+                                            FROM [{station_table}]
+                                            WHERE {where_clause}
+                                            GROUP BY ModuleBarcodeData
+                                        ) grouped
+                                    """)
+
+        if station_table == "Laser_Welding_Station":
+            # Count of distinct modules
+            count_query = text(f"""
+                            SELECT COUNT(DISTINCT ModuleBarcodeData) as total
+                            FROM [{station_table}]
+                            WHERE {where_clause}
+                        """)
+
+            # Module-level OK/NG classification
+            status_query = text(f"""
+                            SELECT
+                                SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng
+                            FROM (
+                                SELECT ModuleBarcodeData,
+                                       MIN(WeldStatus) as min_status,
+                                       MAX(WeldStatus) as max_status
+                                FROM [{station_table}]
+                                WHERE {where_clause}
+                                GROUP BY ModuleBarcodeData
+                            ) grouped
+                        """)
 
         with engine_zone02.connect() as conn:
             df = pd.read_sql(query, conn, params=params)
+            if station_table == "Tracebility_Table" or station_table == "Cell_Depth_Report":
+                dfcount = pd.DataFrame({"total": [None]})
+                dfstats = pd.DataFrame({"total_ok": [None], "total_ng": [None]})
+            else:
+                dfcount = pd.read_sql(count_query, conn, params=params)
+                dfstats = pd.read_sql(status_query, conn, params=params)
 
         # Save Excel inside project exports/
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_station = station_table.replace(" ", "_")
         filename = f"{safe_station}_{timestamp}.xlsx"
-
+        
         export_dir = os.path.join(app.root_path, "exports")
         os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
 
         filepath = os.path.join(export_dir, filename)
-        df.to_excel(filepath, index=False)
+        # df.to_excel(filepath, index=False)
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+          
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count", "Total OK", "Total NG"],
+                "Value": [
+                    "NA" if dfcount.empty or pd.isna(dfcount["total"].iloc[0]) else int(dfcount["total"].iloc[0]),
+                    "NA" if dfstats.empty or pd.isna(dfstats["total_ok"].iloc[0]) else int(dfstats["total_ok"].iloc[0]),
+                    "NA" if dfstats.empty or pd.isna(dfstats["total_ng"].iloc[0]) else int(dfstats["total_ng"].iloc[0]),
+                ]
+            })
+            
+
+            if stats_summary.empty:
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+           
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
 
         return send_file(filepath, as_attachment=True)
+        # return send_file(filepath, as_attachment=True)
 
     except Exception as e:
         print("❌ SQL ERROR (Excel):", e)
@@ -1411,7 +1507,7 @@ def fetch_data_zone03():
 
         def format_datetime(value):
             """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
-            print(value)
+            # print(value)
             if isinstance(value, datetime):
                 return value.strftime("%d %b %Y %H:%M:%S")
             try:
@@ -1498,10 +1594,24 @@ def export_excel_zone03():
             WHERE {where_clause}
             ORDER BY [DateTime] DESC
         """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+        # Status counts
+        status_query = text(f"""
+            SELECT 
+                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
+            FROM [{station_table}]
+            WHERE {where_clause}
+        """)
 
         with engine_zone03.connect() as conn:
             df = pd.read_sql(query, conn, params=params)
-
+            dfcount = pd.read_sql(count_query, conn, params=params)
+            dfstats = pd.read_sql(status_query, conn, params=params)
         # Save Excel inside project exports/
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_station = station_table.replace(" ", "_")
@@ -1509,11 +1619,40 @@ def export_excel_zone03():
 
         export_dir = os.path.join(app.root_path, "exports")
         os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
-
         filepath = os.path.join(export_dir, filename)
-        df.to_excel(filepath, index=False)
+
+        # filepath = os.path.join(export_dir, filename)
+        # df.to_excel(filepath, index=False)
+        # ---- Write Excel with stats on top ----
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count", "Total OK", "Total NG"],
+                "Value": [
+                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                    int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
+                    int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
+                ]
+            })
+            if stats_summary.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
 
         return send_file(filepath, as_attachment=True)
+
+        # return send_file(filepath, as_attachment=True)
 
     except Exception as e:
         print("❌ SQL ERROR (Excel):", e)
