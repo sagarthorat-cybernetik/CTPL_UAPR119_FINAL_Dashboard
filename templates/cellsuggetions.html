@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grade Suggestions Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <div class="title">
+            <h2>Zone 1 Dashboard</h2>
+            <h3>Cell Grade Suggestions</h3>
+        </div>
+        <div class="zones">
+            <button id="zone01dashboard" onclick="zone01dashboard()">Zone 01 Dashboard</button>
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+           <button id="combinedstats" onclick="combinedstatistics()">Combined Statistics</button>
+
+        </div>
+    </header>
+
+    <div class="dashboard">
+        <!-- Filters -->
+        <div class="filters">
+            <div class="eachfilter">
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime">
+            </div>
+            <div class="eachfilter">
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime">
+            </div>
+            <div class="eachfilter">
+                <button id="getSuggestionsBtn" onclick="getSuggestions()">Get Suggestions</button>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" style="display: none; text-align: center; margin: 20px;">
+            <p>Loading suggestions...</p>
+        </div>
+
+        <!-- Summary Stats -->
+        <div id="summaryStats" style="display: none; margin: 20px 0;">
+            <div class="stats-container" style="display: flex; gap: 20px; justify-content: center;">
+                <div class="stat-card">
+                    <h4>Total Rejected Cells</h4>
+                    <p id="totalCells">0</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Outliers Removed</h4>
+                    <p id="outliersRemoved">0</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div id="resultsContainer" style="display: none;">
+            <!-- Equal Width Method -->
+            <div class="method-section">
+                <h2>Equal Width Binning Method</h2>
+                <div class="method-stats">
+                    <p>Accepted: <span id="equalAcceptedCount">0</span> (<span id="equalAcceptedPct">0</span>%)</p>
+                </div>
+
+                <!-- Equal Width Table -->
+                <div class="table-container">
+                    <table id="equalWidthTable">
+                        <thead>
+                            <tr>
+                                <th>Grade</th>
+                                <th>Min Voltage (V)</th>
+                                <th>Max Voltage (V)</th>
+                                <th>Count</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="equalWidthTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Equal Width Chart -->
+                <div class="chart-container" style="margin: 20px auto; max-width: 800px;">
+                    <canvas id="equalWidthChart"></canvas>
+                </div>
+            </div>
+
+            <!-- K-Means Method -->
+            <div class="method-section">
+                <h2>K-Means Clustering Method</h2>
+                <div class="method-stats">
+                    <p>Accepted: <span id="kmeansAcceptedCount">0</span> (<span id="kmeansAcceptedPct">0</span>%)</p>
+                </div>
+
+                <!-- K-Means Table -->
+                <div class="table-container">
+                    <table id="kmeansTable">
+                        <thead>
+                            <tr>
+                                <th>Grade</th>
+                                <th>Min Voltage (V)</th>
+                                <th>Max Voltage (V)</th>
+                                <th>Count</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kmeansTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- K-Means Chart -->
+                <div class="chart-container" style="margin: 20px auto; max-width: 800px;">
+                    <canvas id="kmeansChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorMessage" style="display: none; color: red; text-align: center; margin: 20px;">
+            <p id="errorText"></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='./js/cellsuggetions.js') }}"></script>
+</body>
+</html>

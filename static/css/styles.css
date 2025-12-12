@@ -37,6 +37,8 @@ header .logo {
     display: flex;
     justify-content: right;
     margin-top: 10px;
+     gap: 10px;
+    flex-wrap: wrap;
 }
 /* Dashboard Container */
 .dashboard {
@@ -259,4 +261,64 @@ button:active {
         width: 100%;
         font-size: 0.95rem;
     }
+}
+
+
+
+/* Cell Suggestions Page Specific Styles */
+.method-section {
+    margin: 40px 0;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.method-section h2 {
+    color: #c70000;
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.method-stats {
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.stats-container {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background-color: #f0f0f0;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    min-width: 200px;
+}
+
+.stat-card h4 {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-size: 1rem;
+}
+
+.stat-card p {
+    margin: 0;
+    font-size: 1.8rem;
+    font-weight: bold;
+    color: #c70000;
+}
+
+.chart-container {
+    margin: 20px auto;
+    max-width: 800px;
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }

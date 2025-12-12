@@ -145,6 +145,11 @@ function renderStats(s) {
 }
 
 function updateCharts(stats) {
+  const okColor = 'rgba(75, 192, 192, 0.8)';  // Green/Teal for OK cells
+  const ngColor = 'rgba(255, 99, 132, 0.8)';  // Red for NG cells
+  const okColorBorder = 'rgba(75, 192, 192, 1)';
+  const ngColorBorder = 'rgba(255, 99, 132, 1)';
+
   // main pie
   const ctxMain = document.getElementById("mainPieChart")?.getContext("2d");
   if (ctxMain) {
@@ -153,7 +158,12 @@ function updateCharts(stats) {
         type: "pie",
         data: {
           labels: ["OK Cells", "NG Cells"],
-          datasets: [{ data: [stats.okCells || 0, stats.tngCells || 0] }]
+        datasets: [{
+            data: [stats.okCells || 0, stats.tngCells || 0],
+            backgroundColor: [okColor, ngColor],
+            borderColor: [okColorBorder, ngColorBorder],
+            borderWidth: 2
+          }]
         },
         options: { responsive: true, plugins: { legend: { position: "top" }, title: { display: true, text: "Overall OK vs NG Cells" } } }
       });
@@ -177,7 +187,16 @@ function updateCharts(stats) {
     if (!state.charts.ok) {
       state.charts.ok = new Chart(ctxOk, {
         type: "bar",
-        data: { labels: ["Gear1","Gear2","Gear3","Gear4","Gear5","Gear6"], datasets: [{ label: "OK Cells Per Gear", data: okData }] },
+ data: {
+          labels: ["Gear1","Gear2","Gear3","Gear4","Gear5","Gear6"],
+          datasets: [{
+            label: "OK Cells Per Gear",
+            data: okData,
+            backgroundColor: okColor,
+            borderColor: okColorBorder,
+            borderWidth: 2
+          }]
+        },
         options: { responsive: true, plugins: { legend: { position: "top" }, title: { display: true, text: "OK Cells Per Gear" } } }
       });
     } else {
@@ -201,7 +220,16 @@ function updateCharts(stats) {
     if (!state.charts.ng) {
       state.charts.ng = new Chart(ctxNg, {
         type: "bar",
-        data: { labels: ["Barcode","Voltage","Resistance","Voltage & Resistance","Capacity","Barley Paper","Duplicate"], datasets: [{ label: "NG Cells", data: ngData }] },
+         data: {
+          labels: ["Barcode","Voltage","Resistance","Voltage & Resistance","Capacity","Barley Paper","Duplicate"],
+          datasets: [{
+            label: "NG Cells",
+            data: ngData,
+            backgroundColor: ngColor,
+            borderColor: ngColorBorder,
+            borderWidth: 2
+          }]
+        },
         options: { responsive: true, plugins: { legend: { position: "top" }, title: { display: true, text: "NG Cell Per Reason" } } }
       });
     } else {
@@ -288,11 +316,18 @@ function zone01dashboard() {
 function zone02dashboard() {
   window.location = "/zone02_dashboard";
 }
+// Navigate to cell suggestions page
+function cellsuggestions() {
+  window.location = "/cellsuggestions";
+}
 // Navigate to model dashboard (kept)
 function zone03dashboard() {
   window.location = "zone03_dashboard";
 }
-
+// Navigate to combined statistics page
+function combinedstatistics() {
+  window.location = "/combinedstatistics";
+}
 document.addEventListener("DOMContentLoaded", () => {
   setDefaultDates();
   attachUI();

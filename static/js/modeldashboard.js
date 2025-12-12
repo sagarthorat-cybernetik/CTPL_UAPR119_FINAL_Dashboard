@@ -219,3 +219,11 @@ function zone02dashboard() {
 function zone03dashboard() {
   window.location = "zone03_dashboard";
 }
+// Navigate to cell suggestions page
+function cellsuggestions() {
+  window.location = "/cellsuggestions";
+}
+// Navigate to combined statistics page
+function combinedstatistics() {
+  window.location = "/combinedstatistics";
+}

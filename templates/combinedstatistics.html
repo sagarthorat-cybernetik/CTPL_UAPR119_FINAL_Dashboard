@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Combined Statistics Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+</head>
+<body>
+    <header>
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <div class="title">
+            <h2>Combined Statistics Dashboard</h2>
+            <h3>All Zones Summary</h3>
+        </div>
+        <div class="zones">
+            <button id="zone01dashboard" onclick="zone01dashboard()">Zone 01 Dashboard</button>
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+        </div>
+    </header>
+
+    <div class="dashboard">
+        <!-- Filters -->
+        <div class="filters">
+            <div class="eachfilter">
+                <label for="zoneSelect">Select Zone:</label>
+                <select id="zoneSelect">
+                    <option value="zone1">Zone 1</option>
+                    <option value="zone2">Zone 2</option>
+                    <option value="zone3">Zone 3</option>
+                </select>
+            </div>
+            <div class="eachfilter">
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime">
+            </div>
+            <div class="eachfilter">
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime">
+            </div>
+            <div class="eachfilter">
+                <button id="getStatsBtn" onclick="getStatistics()">Get Statistics</button>
+            </div>
+        </div>
+
+        <!-- Export Buttons -->
+        <div class="titletabels" style="margin-top: 20px;">
+            <button id="exportAllBtn" onclick="exportAllZones()" style="background: linear-gradient(145deg, #ff6600, #000000c2);">
+                📊 Download All Zones
+            </button>
+            <button id="exportZoneBtn" onclick="exportCurrentZone()" style="display: none;">
+                📥 Download Current Zone
+            </button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" style="display: none; text-align: center; margin: 20px;">
+            <div class="logo-progress">
+                <img src="../static/images/logo.png" alt="logo">
+                <div class="ring"></div>
+            </div>
+            <p>Loading statistics...</p>
+        </div>
+
+        <!-- Zone 1 Content -->
+        <div id="zone1Content" style="display: none;">
+            <h1>Zone 1 Statistics</h1>
+
+            <!-- Summary Cards -->
+            <div class="stats-container" style="display: flex; gap: 20px; justify-content: center; margin: 20px 0;">
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>Total Cells</h4>
+                    <p id="z1TotalCells">0</p>
+                </div>
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>OK Cells</h4>
+                    <p id="z1OkCells" style="color: #4BC0C0;">0</p>
+                </div>
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>NG Cells</h4>
+                    <p id="z1NgCells" style="color: #FF6384;">0</p>
+                </div>
+            </div>
+
+            <div class="stats-container" style="display: flex; gap: 20px; justify-content: center; margin: 20px 0;">
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>Total Modules</h4>
+                    <p id="z1TotalModules">0</p>
+                </div>
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>OK Modules</h4>
+                    <p id="z1OkModules" style="color: #4BC0C0;">0</p>
+                </div>
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>NG Modules</h4>
+                    <p id="z1NgModules" style="color: #FF6384;">0</p>
+                </div>
+                <div class="stat-card" style="flex: 1; max-width: 300px;">
+                    <h4>In Progress</h4>
+                    <p id="z1InProgressModules" style="color: #FFCE56;">0</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone 2 Content -->
+        <div id="zone2Content" style="display: none;">
+            <h1>Zone 2 Station Statistics</h1>
+            <div class="table-container">
+                <table id="zone2Table">
+                    <thead>
+                        <tr>
+                            <th>Station Name</th>
+                            <th>Total Modules</th>
+                            <th>OK Modules</th>
+                            <th>NG Modules</th>
+                            <th>AVG Cycle Time</th>
+                            <th>OK %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="zone2TableBody">
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight: bold; background-color: #f0f0f0;">
+                            <td>Total</td>
+                            <td id="z2TotalSum">0</td>
+                            <td id="z2OkSum">0</td>
+                            <td id="z2NgSum">0</td>
+                            <td id="z2avgcytime">0</td>
+                            <td id="z2OkPercent">0%</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Zone 3 Content -->
+        <div id="zone3Content" style="display: none;">
+            <h1>Zone 3 Station Statistics</h1>
+            <div class="table-container">
+                <table id="zone3Table">
+                    <thead>
+                        <tr>
+                            <th>Station Name</th>
+                            <th>Total Modules</th>
+                            <th>OK Modules</th>
+                            <th>NG Modules</th>
+                            <th>AVG Cycle Time</th>
+                            <th>OK %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="zone3TableBody">
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight: bold; background-color: #f0f0f0;">
+                            <td>Total</td>
+                            <td id="z3TotalSum">0</td>
+                            <td id="z3OkSum">0</td>
+                            <td id="z3NgSum">0</td>
+                            <td id="z3avgcytime">0</td>
+                            <td id="z3OkPercent">0%</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorMessage" style="display: none; color: red; text-align: center; margin: 20px;">
+            <p id="errorText"></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='./js/combinedstatistics.js') }}"></script>
+</body>
+</html>

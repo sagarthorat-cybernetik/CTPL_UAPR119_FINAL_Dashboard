@@ -213,3 +213,7 @@ function zone02dashboard() {
 function zone03dashboard() {
   window.location = "zone03_dashboard";
 }
+// Navigate to combined statistics page
+function combinedstatistics() {
+  window.location = "/combinedstatistics";
+}
