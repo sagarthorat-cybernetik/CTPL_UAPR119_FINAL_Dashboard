@@ -38,6 +38,41 @@
                 <label for="endDateTime">End DateTime:</label>
                 <input type="datetime-local" id="endDateTime">
             </div>
+            <div>
+
+
+                <div class="eachfilter extra_filter">
+                    <label>IR Bin Width</label>
+                    <input type="number" step="0.01" id="ir_bin_width">
+                </div>
+
+                <div class="eachfilter extra_filter">
+                    <label>IR Underflow</label>
+                    <input type="number" step="0.01" id="ir_underflow">
+                </div>
+
+                <div class="eachfilter extra_filter">
+                    <label>IR Overflow</label>
+                    <input type="number" step="0.01" id="ir_overflow">
+                </div>
+            </div>
+            <div>
+
+                <div class="eachfilter extra_filter">
+                    <label>Voltage Bin Width</label>
+                    <input type="number" step="0.001" id="voltage_bin_width">
+                </div>
+
+                <div class="eachfilter extra_filter">
+                    <label>Voltage Underflow</label>
+                    <input type="number" step="0.001" id="voltage_underflow">
+                </div>
+
+                <div class="eachfilter extra_filter">
+                    <label>Voltage Overflow</label>
+                    <input type="number" step="0.001" id="voltage_overflow">
+                </div>
+            </div>
             <div class="eachfilter">
                 <button id="getSuggestionsBtn" onclick="getSuggestions()">Get Suggestions</button>
             </div>
@@ -64,39 +99,9 @@
 
         <!-- Results Container -->
         <div id="resultsContainer" style="display: none;">
-            <!-- Equal Width Method -->
+                        <!--Voltage  -->
             <div class="method-section">
-                <h2>Equal Width Binning Method</h2>
-                <div class="method-stats">
-                    <p>Accepted: <span id="equalAcceptedCount">0</span> (<span id="equalAcceptedPct">0</span>%)</p>
-                </div>
-
-                <!-- Equal Width Table -->
-                <div class="table-container">
-                    <table id="equalWidthTable">
-                        <thead>
-                            <tr>
-                                <th>Grade</th>
-                                <th>Min Voltage (V)</th>
-                                <th>Max Voltage (V)</th>
-                                <th>Count</th>
-                                <th>Percentage</th>
-                            </tr>
-                        </thead>
-                        <tbody id="equalWidthTableBody">
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Equal Width Chart -->
-                <div class="chart-container" style="margin: 20px auto; max-width: 800px;">
-                    <canvas id="equalWidthChart"></canvas>
-                </div>
-            </div>
-
-            <!-- K-Means Method -->
-            <div class="method-section">
-                <h2>K-Means Clustering Method</h2>
+                <h2> Voltage </h2>
                 <div class="method-stats">
                     <p>Accepted: <span id="kmeansAcceptedCount">0</span> (<span id="kmeansAcceptedPct">0</span>%)</p>
                 </div>
@@ -106,23 +111,49 @@
                     <table id="kmeansTable">
                         <thead>
                             <tr>
-                                <th>Grade</th>
-                                <th>Min Voltage (V)</th>
-                                <th>Max Voltage (V)</th>
-                                <th>Count</th>
-                                <th>Percentage</th>
+                                <th>Range</th>
+                                <th>Value</th>
                             </tr>
                         </thead>
-                        <tbody id="kmeansTableBody">
+                        <tbody id="voltageTableBody">
                         </tbody>
                     </table>
                 </div>
 
                 <!-- K-Means Chart -->
                 <div class="chart-container" style="margin: 20px auto; max-width: 800px;">
-                    <canvas id="kmeansChart"></canvas>
+                    <canvas id="voltageChart"></canvas>
+                </div>
+
+            </div>
+            <!-- IR -->
+            <div class="method-section">
+                <h2>IR</h2>
+                <div class="method-stats">
+                    <p>Accepted: <span id="equalAcceptedCount">0</span> (<span id="equalAcceptedPct">0</span>%)</p>
+                </div>
+
+                <!-- Equal Width Table -->
+                <div class="table-container">
+                    <table id="equalWidthTable">
+                        <thead>
+                            <tr>
+                                <th>Range</th>
+                                <th>Value</th>
+
+                            </tr>
+                        </thead>
+                        <tbody id="irTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!--  ir Chart -->
+                <div class="chart-container" style="margin: 20px auto; max-width: 800px;">
+                    <canvas id="irChart"></canvas>
                 </div>
             </div>
+
         </div>
 
         <!-- Error Message -->

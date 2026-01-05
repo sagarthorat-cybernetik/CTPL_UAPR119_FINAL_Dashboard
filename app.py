@@ -24,6 +24,12 @@ app.secret_key = "super_secret_key_123"
 USERS = {
     "admin": "123"
 }
+IR_BIN_WIDTH = 0.05
+IR_UNDERFLOW =1.5
+IR_OVERFLOW = 2.2
+VOLTAGE_BIN_WIDTH = 0.003
+VOLTAGE_UNDERFLOW = 3.27
+VOLTAGE_OVERFLOW = 3.3
 # -----------------------
 # Database: SQLAlchemy pool
 # -----------------------
@@ -1704,8 +1710,26 @@ def export_excel_zone03():
 # -----------------------
 # Grade Suggestions API
 # -----------------------
+@app.route("/api/grade_config", methods=["POST"])
+def api_grade_config():
+    results = {
+        "ir_bin_width" : IR_BIN_WIDTH,
+        "ir_underflow" : IR_UNDERFLOW,
+        "ir_overflow" : IR_OVERFLOW,
+        "voltage_bin_width": VOLTAGE_BIN_WIDTH,
+        "voltage_underflow": VOLTAGE_UNDERFLOW,
+        "voltage_overflow": VOLTAGE_OVERFLOW,
+
+    }
+    return jsonify(results)
 @app.route("/api/grade_suggestions", methods=["POST"])
 def api_grade_suggestions():
+    global IR_BIN_WIDTH
+    global IR_UNDERFLOW
+    global IR_OVERFLOW
+    global VOLTAGE_BIN_WIDTH
+    global VOLTAGE_UNDERFLOW
+    global VOLTAGE_OVERFLOW
     """
     Fetch rejected cells from DB and return grade suggestions using both methods.
     Expected JSON body: {"start_date": "...", "end_date": "..."}
@@ -1714,6 +1738,13 @@ def api_grade_suggestions():
         body = request.get_json(force=True) or {}
         start = body.get("start_date")
         end = body.get("end_date")
+        IR_BIN_WIDTH = body.get("ir_bin_width", 0.05)
+        IR_UNDERFLOW = body.get("ir_underflow", 1.5)
+        IR_OVERFLOW = body.get("ir_overflow", 2.2)
+
+        VOLTAGE_BIN_WIDTH = body.get("voltage_bin_width", 0.003)
+        VOLTAGE_UNDERFLOW = body.get("voltage_underflow", 3.26)
+        VOLTAGE_OVERFLOW = body.get("voltage_overflow", 3.3)
 
         # Parse dates
         start_dt = parse_date(start) if start else None
@@ -1732,11 +1763,19 @@ def api_grade_suggestions():
             SELECT 
                 cr.Cell_Barcode as cell_id,
                 cr.Cell_Voltage_Actual as measured_voltage,
-                cr.Cell_Resistance_Actual as measured_current
+                cr.Cell_Resistance_Actual as measured_resistance
             FROM [ZONE01_REPORTS].[dbo].[Cell_Report] cr
-            WHERE {where} AND cr.Cell_Final_Status = 0
+            WHERE {where} AND cr.Cell_Final_Status = 0 AND ((LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%vtg%' AND LOWER(ISNULL(cr.Cell_Fail_Reason,'')) NOT LIKE '%&%')
+            OR (LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%ir%'  AND LOWER(ISNULL(cr.Cell_Fail_Reason,'')) NOT LIKE '%&%')
+            OR (LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%vtg & ir%'))
         """)
-
+# """      SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%paper%' THEN 1 ELSE 0 END) AS bpaperngCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%barcode%' THEN 1 ELSE 0 END) AS bngCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%vtg%' AND LOWER(ISNULL(cr.Cell_Fail_Reason,'')) NOT LIKE '%&%' THEN 1 ELSE 0 END) AS vngCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%ir%'  AND LOWER(ISNULL(cr.Cell_Fail_Reason,'')) NOT LIKE '%&%' THEN 1 ELSE 0 END) AS ingCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%vtg & ir%' THEN 1 ELSE 0 END) AS vingCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%capacity%' THEN 1 ELSE 0 END) AS cngCells,
+#             SUM(CASE WHEN LOWER(ISNULL(cr.Cell_Fail_Reason,'')) LIKE '%duplicate%' THEN 1 ELSE 0 END) AS dpngCells"""
         with engine.connect() as conn:
             result = conn.execute(query, params)
             rows = result.fetchall()
@@ -1747,7 +1786,7 @@ def api_grade_suggestions():
             rejected_cells.append({
                 "cell_id": row[0],
                 "measured_voltage": float(row[1]) if row[1] is not None else 0.0,
-                "measured_current": float(row[2]) if row[2] is not None else 0.0
+                "measured_resistance": float(row[2]) if row[2] is not None else 0.0
             })
 
         if not rejected_cells:
@@ -1759,7 +1798,7 @@ def api_grade_suggestions():
             })
 
         # Use the GradeSuggestionEngine
-        engine_gs = GradeSuggestionEngine(grade_count=6, iqr_multiplier=1.5, round_digits=2)
+        engine_gs = GradeSuggestionEngine(grade_count=6, iqr_multiplier=1.5, round_digits=2, IR_BIN_WIDTH=IR_BIN_WIDTH, IR_OVERFLOW=IR_OVERFLOW, IR_UNDERFLOW=IR_UNDERFLOW, VOLTAGE_BIN_WIDTH=VOLTAGE_BIN_WIDTH, VOLTAGE_OVERFLOW=VOLTAGE_OVERFLOW, VOLTAGE_UNDERFLOW=VOLTAGE_UNDERFLOW)
         results = engine_gs.suggest_both_methods(rejected_cells)
 
         return jsonify(results)

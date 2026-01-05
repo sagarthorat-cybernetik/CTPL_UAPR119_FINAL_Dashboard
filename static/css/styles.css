@@ -78,6 +78,9 @@ h1, h2, h3 {
     width: 22%;
     margin-bottom: 10px;
 }
+.extra_filter{
+    width:100%
+}
 label{
     font-size: 0.8rem;
 }

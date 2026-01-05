@@ -16,6 +16,7 @@ function combinedstatistics() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setDefaultDates();
+  fillConfigInputs();
 
 });
 // --- Default Dates = today ---
@@ -35,213 +36,200 @@ function formatForInput(date) {
   const mm = String(date.getMinutes()).padStart(2, "0");
   return `${y}-${m}-${d}T${hh}:${mm}`;
 }
-// Chart instances
-let equalWidthChartInstance = null;
-let kmeansChartInstance = null;
 
-// Get Suggestions function
+// Chart instances
+let irChartInstance = null;
+let voltageChartInstance = null;
+
+async function fillConfigInputs() {
+     const response = await fetch('/api/grade_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+
+    });
+
+    const config = await response.json();
+//    console.log("API DATA:", config);
+
+    if (!response.ok) {
+        throw new Error(data.error || 'API error');
+    }
+    document.getElementById('ir_bin_width').value = config.ir_bin_width;
+    document.getElementById('ir_underflow').value = config.ir_underflow;
+    document.getElementById('ir_overflow').value = config.ir_overflow;
+
+    document.getElementById('voltage_bin_width').value = config.voltage_bin_width;
+    document.getElementById('voltage_underflow').value = config.voltage_underflow;
+    document.getElementById('voltage_overflow').value = config.voltage_overflow;
+}
+
+// ---------------- FETCH DATA ----------------
 async function getSuggestions() {
     const startDateTime = document.getElementById('startDateTime').value;
     const endDateTime = document.getElementById('endDateTime').value;
 
-    // Validate date inputs
     if (!startDateTime || !endDateTime) {
         showError('Please select both start and end date/time');
         return;
     }
 
-    // Hide previous results and errors
-    document.getElementById('resultsContainer').style.display = 'none';
-    document.getElementById('errorMessage').style.display = 'none';
-    document.getElementById('summaryStats').style.display = 'none';
-
-    // Show loading indicator
     document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('errorMessage').style.display = 'none';
+    document.getElementById('resultsContainer').style.display = 'none';
 
     try {
+        // 🔹 Read config inputs
+        const payload = {
+            start_date: startDateTime,
+            end_date: endDateTime,
+
+            ir_bin_width: parseFloat(document.getElementById('ir_bin_width').value),
+            ir_underflow: parseFloat(document.getElementById('ir_underflow').value),
+            ir_overflow: parseFloat(document.getElementById('ir_overflow').value),
+
+            voltage_bin_width: parseFloat(document.getElementById('voltage_bin_width').value),
+            voltage_underflow: parseFloat(document.getElementById('voltage_underflow').value),
+            voltage_overflow: parseFloat(document.getElementById('voltage_overflow').value)
+        };
         const response = await fetch('/api/grade_suggestions', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                start_date: startDateTime,
-                end_date: endDateTime
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
-//        console.log(data)
+//        console.log("API DATA:", data);
+
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to fetch suggestions');
+            throw new Error(data.error || 'API error');
         }
 
-        // Hide loading indicator
         document.getElementById('loadingIndicator').style.display = 'none';
 
-        // Check if we have data
-        if (data.equal_width.total_cells === 0) {
-            showError('No rejected cells found in the selected date range');
+        if (data.final_results.total_cells === 0) {
+            showError('No rejected cells found');
             return;
         }
 
-        // Display results
-        displayResults(data);
+        displayResults(data.final_results);
 
-    } catch (error) {
+    } catch (err) {
         document.getElementById('loadingIndicator').style.display = 'none';
-        showError('Error: ' + error.message);
-        console.error('Error fetching suggestions:', error);
+        showError(err.message);
+        console.error(err);
     }
 }
 
-function displayResults(data) {
-    const equalWidth = data.equal_width;
-    const kmeans = data.kmeans;
+// ---------------- DISPLAY RESULTS ----------------
+function displayResults(results) {
 
-    // Show summary stats
+    // Summary
     document.getElementById('summaryStats').style.display = 'block';
-    document.getElementById('totalCells').textContent = equalWidth.total_cells;
-    document.getElementById('outliersRemoved').textContent = equalWidth.ignored_outliers_count;
+    document.getElementById('totalCells').textContent = results.total_cells;
+    document.getElementById('outliersRemoved').textContent = results.ignored_outliers_count;
 
-    // Display Equal Width results
-    document.getElementById('equalAcceptedCount').textContent = equalWidth.accepted_count;
-    document.getElementById('equalAcceptedPct').textContent = equalWidth.accepted_pct;
-    populateTable('equalWidthTableBody', equalWidth.grades);
-    createChart('equalWidthChart', equalWidth.grades, 'Equal Width Binning', 'equalWidth');
+    // Tables
+    populateHistogramTable(
+        'irTableBody',
+        results.bin_edges_ir,
+        results.hist_ir
+    );
 
-    // Display K-Means results
-    if (kmeans.error) {
-        document.getElementById('kmeansAcceptedCount').textContent = 'N/A';
-        document.getElementById('kmeansAcceptedPct').textContent = 'N/A';
-        const kmeansBody = document.getElementById('kmeansTableBody');
-        kmeansBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: red;">K-Means unavailable: ' + kmeans.error + '</td></tr>';
-    } else {
-        document.getElementById('kmeansAcceptedCount').textContent = kmeans.accepted_count;
-        document.getElementById('kmeansAcceptedPct').textContent = kmeans.accepted_pct;
-        populateTable('kmeansTableBody', kmeans.grades);
-        createChart('kmeansChart', kmeans.grades, 'K-Means Clustering', 'kmeans');
-    }
+    populateHistogramTable(
+        'voltageTableBody',
+        results.bin_edges_voltage,
+        results.hist_voltage
+    );
 
-    // Show results container
+    // Charts
+    createHistogramChart(
+        'irChart',
+        results.bin_edges_ir,
+        results.hist_ir,
+        'IR Histogram',
+        'Ω',
+        'ir'
+    );
+
+    createHistogramChart(
+        'voltageChart',
+        results.bin_edges_voltage,
+        results.hist_voltage,
+        'Voltage Histogram',
+        'V',
+        'voltage'
+    );
+
     document.getElementById('resultsContainer').style.display = 'block';
 }
 
-function populateTable(tableBodyId, grades) {
+// ---------------- TABLE ----------------
+function populateHistogramTable(tableBodyId, binEdges, hist) {
     const tbody = document.getElementById(tableBodyId);
     tbody.innerHTML = '';
 
-    grades.forEach(grade => {
+    for (let i = 0; i < hist.length; i++) {
+//        const rangeLabel = `${binEdges[i]} – ${binEdges[i + 1] ?? ''}`;
+
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td>${grade.grade_name}</td>
-            <td>${grade.vmin}</td>
-            <td>${grade.vmax}</td>
-            <td>${grade.count}</td>
-            <td>${grade.pct}%</td>
+            <td>${binEdges[i]}</td>
+            <td>${hist[i]}</td>
         `;
         tbody.appendChild(row);
-    });
+    }
 }
 
-function createChart(canvasId, grades, title, chartType) {
+// ---------------- CHART ----------------
+function createHistogramChart(canvasId, binEdges, hist, title, unit, type) {
     const ctx = document.getElementById(canvasId).getContext('2d');
 
-    // Destroy existing chart if it exists
-    if (chartType === 'equalWidth' && equalWidthChartInstance) {
-        equalWidthChartInstance.destroy();
-    }
-    if (chartType === 'kmeans' && kmeansChartInstance) {
-        kmeansChartInstance.destroy();
+    const labels = [];
+    for (let i = 0; i < hist.length; i++) {
+        labels.push(`${binEdges[i]}`);
     }
 
-    const labels = grades.map(g => g.grade_name);
-    const counts = grades.map(g => g.count);
-    const percentages = grades.map(g => g.pct);
+    // Destroy previous instance
+    if (type === 'ir' && irChartInstance) irChartInstance.destroy();
+    if (type === 'voltage' && voltageChartInstance) voltageChartInstance.destroy();
 
-    // Color palette
-    const colors = [
-        'rgba(255, 99, 132, 0.7)',
-        'rgba(54, 162, 235, 0.7)',
-        'rgba(255, 206, 86, 0.7)',
-        'rgba(75, 192, 192, 0.7)',
-        'rgba(153, 102, 255, 0.7)',
-        'rgba(255, 159, 64, 0.7)'
-    ];
-
-    const borderColors = [
-        'rgba(255, 99, 132, 1)',
-        'rgba(54, 162, 235, 1)',
-        'rgba(255, 206, 86, 1)',
-        'rgba(75, 192, 192, 1)',
-        'rgba(153, 102, 255, 1)',
-        'rgba(255, 159, 64, 1)'
-    ];
-
-    const chartInstance = new Chart(ctx, {
+    const chart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Cell Count',
-                data: counts,
-                backgroundColor: colors.slice(0, grades.length),
-                borderColor: borderColors.slice(0, grades.length),
-                borderWidth: 2
+                label: `Cell Count (${unit})`,
+                data: hist,
+                borderWidth: 1
             }]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: true,
             plugins: {
                 title: {
                     display: true,
-                    text: title,
-                    font: {
-                        size: 18
-                    }
+                    text: title
                 },
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
-                tooltip: {
-                    callbacks: {
-                        afterLabel: function(context) {
-                            const idx = context.dataIndex;
-                            return `Percentage: ${percentages[idx]}%\nVoltage Range: ${grades[idx].vmin}V - ${grades[idx].vmax}V`;
-                        }
-                    }
-                }
+                legend: { display: false }
             },
             scales: {
+                x: {
+                    title: { display: true, text: 'Range' }
+                },
                 y: {
                     beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Number of Cells'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Grade'
-                    }
+                    title: { display: true, text: 'Cell Count' }
                 }
             }
         }
     });
 
-    // Store chart instance
-    if (chartType === 'equalWidth') {
-        equalWidthChartInstance = chartInstance;
-    } else {
-        kmeansChartInstance = chartInstance;
-    }
+    if (type === 'ir') irChartInstance = chart;
+    if (type === 'voltage') voltageChartInstance = chart;
 }
 
+// ---------------- ERROR ----------------
 function showError(message) {
     document.getElementById('errorText').textContent = message;
     document.getElementById('errorMessage').style.display = 'block';
 }
-

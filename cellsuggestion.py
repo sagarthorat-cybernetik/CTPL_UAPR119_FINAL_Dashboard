@@ -26,6 +26,8 @@ Notes:
 from typing import List, Dict, Tuple, Optional
 import math
 
+import numpy as np
+
 
 class GradeSuggestionEngine:
     """
@@ -33,7 +35,7 @@ class GradeSuggestionEngine:
     Provides two methods: equal-width binning and k-means clustering.
     """
 
-    def __init__(self, grade_count: int = 6, iqr_multiplier: float = 1.5, round_digits: int = 2):
+    def __init__(self, grade_count: int = 6, iqr_multiplier: float = 1.5, round_digits: int = 2, IR_BIN_WIDTH: float = 0.05, IR_OVERFLOW:float = 2.2, IR_UNDERFLOW: float = 1.5, VOLTAGE_BIN_WIDTH: float = 0.003,VOLTAGE_OVERFLOW: float = 3.3, VOLTAGE_UNDERFLOW: float = 3.26):
         """
         Initialize the grade suggestion engine.
 
@@ -45,6 +47,12 @@ class GradeSuggestionEngine:
         self.grade_count = grade_count
         self.iqr_multiplier = iqr_multiplier
         self.round_digits = round_digits
+        self.ir_bin_width = IR_BIN_WIDTH
+        self.ir_overflow =  IR_OVERFLOW
+        self.ir_underflow = IR_UNDERFLOW
+        self.voltage_bin_width = VOLTAGE_BIN_WIDTH
+        self.voltage_overflow = VOLTAGE_OVERFLOW
+        self.voltage_underflow = VOLTAGE_UNDERFLOW
 
     def suggest_both_methods(self, rejected_cells: List[Dict], random_state: Optional[int] = 42) -> Dict:
         """
@@ -58,65 +66,132 @@ class GradeSuggestionEngine:
             Dict with both equal_width and kmeans results
         """
         equal_width_result = self.suggest_ranges_equal_width(rejected_cells)
-        try:
-            kmeans_result = self.suggest_ranges_kmeans(rejected_cells, random_state=random_state)
-        except RuntimeError as e:
-            kmeans_result = {"error": str(e), "grades": [], "total_cells": 0,
-                             "accepted_count": 0, "accepted_pct": 0.0, "ignored_outliers_count": 0}
+        # try:
+        #     kmeans_result = self.suggest_ranges_kmeans(rejected_cells, random_state=random_state)
+        # except RuntimeError as e:
+        #     kmeans_result = {"error": str(e), "grades": [], "total_cells": 0,
+        #                      "accepted_count": 0, "accepted_pct": 0.0, "ignored_outliers_count": 0}
 
         return {
-            "equal_width": equal_width_result,
-            "kmeans": kmeans_result
+            "final_results": equal_width_result
+            # "kmeans": kmeans_result
         }
 
     def suggest_ranges_equal_width(self, rejected_cells: List[Dict]) -> Dict:
+
         """Generate grade ranges using equal-width binning."""
+
         volts = self._extract_voltages(rejected_cells)
         total = len(volts)
-        if total == 0:
-            return {"grades": [], "total_cells": 0, "accepted_count": 0, "accepted_pct": 0.0,
-                    "ignored_outliers_count": 0}
+        ir = self._extract_resistance(rejected_cells)
+        total_ir = len(ir)
+        # print(f"len:{len(volts)} ")
+        #
+        # print(f"len: {len(ir)} ")
+        # Config
+        BIN_WIDTH_voltage = self.voltage_bin_width
+        MIN_VAL_voltage = self.voltage_underflow
+        MAX_VAL_voltage = self.voltage_overflow
+        data_voltage=np.array(volts)
+        # Separate underflow / overflow
+        underflow = data_voltage[data_voltage < MIN_VAL_voltage]
+        overflow = data_voltage[data_voltage > MAX_VAL_voltage]
+        in_range_voltage = data_voltage[(data_voltage >= MIN_VAL_voltage) & (data_voltage <= MAX_VAL_voltage)]
+        # Underflow & overflow
+        underflow_count_voltage = int(np.sum(data_voltage < MIN_VAL_voltage))
+        overflow_count_voltage = int(np.sum(data_voltage > MAX_VAL_voltage))
 
-        filtered_volts, kept_idx = self._iqr_filter(volts, iqr_multiplier=self.iqr_multiplier)
-        ignored = total - len(filtered_volts)
-        if not filtered_volts:
-            return {"grades": [], "total_cells": total, "accepted_count": 0, "accepted_pct": 0.0,
-                    "ignored_outliers_count": ignored}
+        # Create bins
+        bins_voltage = np.arange(MIN_VAL_voltage, MAX_VAL_voltage + BIN_WIDTH_voltage, BIN_WIDTH_voltage)
 
-        vmin = min(filtered_volts)
-        vmax = max(filtered_volts)
-        if vmin == vmax:
-            bins = [(vmin, vmax) for _ in range(self.grade_count)]
-        else:
-            width = (vmax - vmin) / self.grade_count
-            bins = []
-            for i in range(self.grade_count):
-                bmin = vmin + i * width
-                bmax = (vmin + (i + 1) * width) if i < self.grade_count - 1 else vmax
-                bins.append((bmin, bmax))
+        hist_voltage, bin_edges_voltage = np.histogram(in_range_voltage, bins=bins_voltage)
+        hist_voltage = [underflow_count_voltage] + hist_voltage.tolist() + [overflow_count_voltage]
+        bin_edges_voltage = [f"<{MIN_VAL_voltage}"] + [f"{round(bin_edges_voltage[i],4)} - {round(bin_edges_voltage[i+1],4)}" for i in range(len(bin_edges_voltage)-1)] + [f">{MAX_VAL_voltage}"]
+        #
+        # print("Underflow count:", len(underflow))
+        # print("Overflow count:", len(overflow))
+        # print("in range",len(in_range_voltage))
+        # print("Histogram:", hist_voltage)
+        # print("Bins:", bin_edges_voltage)
 
-        bins = self._make_non_overlapping(bins, round_digits=self.round_digits)
+        #
+        BIN_WIDTH_ir = self.ir_bin_width
+        MIN_VAL_ir = self.ir_underflow
+        MAX_VAL_ir = self.ir_overflow
+        data_ir = np.array(ir)
+        # Separate underflow / overflow
+        underflow = data_ir[data_ir < MIN_VAL_ir]
+        overflow = data_ir[data_ir > MAX_VAL_ir]
+        in_range_ir = data_ir[(data_ir >= MIN_VAL_ir) & (data_ir <= MAX_VAL_ir)]
+        # Underflow & overflow
+        underflow_count_ir = int(np.sum(data_ir < MIN_VAL_ir))
+        overflow_count_ir = int(np.sum(data_ir > MAX_VAL_ir))
 
-        grades = []
-        for idx, (mn, mx) in enumerate(bins):
-            count = sum(1 for v in filtered_volts if mn <= v <= mx)
-            pct = 100.0 * count / total if total > 0 else 0.0
-            grades.append({
-                "grade_name": f"Grade {idx + 1}",
-                "vmin": round(mn, self.round_digits),
-                "vmax": round(mx, self.round_digits),
-                "count": count,
-                "pct": round(pct, 2)
-            })
-        accepted_count = sum(g["count"] for g in grades)
-        accepted_pct = round(100.0 * accepted_count / total, 2) if total > 0 else 0.0
+        # Create bins
+        bins_ir = np.arange(MIN_VAL_ir, MAX_VAL_ir + BIN_WIDTH_ir, BIN_WIDTH_ir)
+
+        hist_ir, bin_edges_ir = np.histogram(in_range_ir, bins=bins_ir)
+        hist_ir = [underflow_count_ir] + hist_ir.tolist() + [overflow_count_ir]
+        bin_edges_ir = [f"<{MIN_VAL_ir}"] + [f"{round(bin_edges_ir[i],4)} - {round(bin_edges_ir[i+1],4)}" for i in range(len(bin_edges_ir)-1)] + [f">{MAX_VAL_ir}"]
+        #
+        # print("Underflow count:", len(underflow))
+        # print("Overflow count:", len(overflow))
+        # print("in range",len(in_range_ir))
+        # print("Histogram:", hist_ir)
+        # print("Bins:", bin_edges_ir)
+
         return {
-            "grades": grades,
-            "total_cells": total,
-            "accepted_count": accepted_count,
-            "accepted_pct": accepted_pct,
-            "ignored_outliers_count": ignored
+            "hist_voltage" : hist_voltage,
+            "bin_edges_voltage" : bin_edges_voltage,
+            "hist_ir" : hist_ir,
+            "bin_edges_ir" : bin_edges_ir,
+            "total_cells" : len(rejected_cells),
+            "ignored_outliers_count" : underflow_count_voltage + underflow_count_ir + overflow_count_voltage + overflow_count_ir
         }
+        # if total == 0:
+        #     return {"grades": [], "total_cells": 0, "accepted_count": 0, "accepted_pct": 0.0,
+        #             "ignored_outliers_count": 0}
+        #
+        # filtered_volts, kept_idx = self._iqr_filter(volts, iqr_multiplier=self.iqr_multiplier)
+        # ignored = total - len(filtered_volts)
+        # if not filtered_volts:
+        #     return {"grades": [], "total_cells": total, "accepted_count": 0, "accepted_pct": 0.0,
+        #             "ignored_outliers_count": ignored}
+        #
+        # vmin = min(filtered_volts)
+        # vmax = max(filtered_volts)
+        # if vmin == vmax:
+        #     bins = [(vmin, vmax) for _ in range(self.grade_count)]
+        # else:
+        #     width = (vmax - vmin) / self.grade_count
+        #     bins = []
+        #     for i in range(self.grade_count):
+        #         bmin = vmin + i * width
+        #         bmax = (vmin + (i + 1) * width) if i < self.grade_count - 1 else vmax
+        #         bins.append((bmin, bmax))
+        #
+        # bins = self._make_non_overlapping(bins, round_digits=self.round_digits)
+        #
+        # grades = []
+        # for idx, (mn, mx) in enumerate(bins):
+        #     count = sum(1 for v in filtered_volts if mn <= v <= mx)
+        #     pct = 100.0 * count / total if total > 0 else 0.0
+        #     grades.append({
+        #         "grade_name": f"Grade {idx + 1}",
+        #         "vmin": round(mn, self.round_digits),
+        #         "vmax": round(mx, self.round_digits),
+        #         "count": count,
+        #         "pct": round(pct, 2)
+        #     })
+        # accepted_count = sum(g["count"] for g in grades)
+        # accepted_pct = round(100.0 * accepted_count / total, 2) if total > 0 else 0.0
+        # return {
+        #     "grades": grades,
+        #     "total_cells": total,
+        #     "accepted_count": accepted_count,
+        #     "accepted_pct": accepted_pct,
+        #     "ignored_outliers_count": ignored
+        # }
 
     def suggest_ranges_kmeans(self, rejected_cells: List[Dict], random_state: Optional[int] = 42) -> Dict:
         """Generate grade ranges using k-means clustering."""
@@ -188,10 +263,25 @@ class GradeSuggestionEngine:
             if v is None:
                 v = c.get("measured_voltage") or c.get("voltage")
             try:
-                volts.append(float(v))
+                if float(v) >= 3:
+                    volts.append(round(float(v),4))
             except Exception:
                 continue
         return volts
+
+    @staticmethod
+    def _extract_resistance(rejected_cells: List[Dict]) -> List[float]:
+        ir = []
+        for c in rejected_cells:
+            v = c.get("measured_resistance", None)
+            if v is None:
+                v = c.get("measured_resistance") or c.get("voltage")
+            try:
+                if float(v) <= 5:
+                    ir.append(float(v))
+            except Exception:
+                continue
+        return ir
 
     @staticmethod
     def _iqr_filter(volts: List[float], iqr_multiplier: float = 1.5) -> Tuple[List[float], List[int]]:
