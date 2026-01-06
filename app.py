@@ -190,7 +190,10 @@ def cellsuggestions():
 def combinedstatistics():
     return render_template("combinedstatistics.html")
 
-
+@app.route("/allinonedashboard")
+@login_required
+def allinonedashboard():
+    return render_template("allinonedashboard.html")
 # -----------------------
 # Login Route
 # -----------------------
@@ -2360,10 +2363,370 @@ def api_combined_statistics_export_all():
         return jsonify({"error": str(e)}), 500
 
 
+
+# -----------------------
+#  All in one data fetch API for Zone 3 stations 
+# -----------------------
+
+# === Paginated fetch with filters ===
+@app.route("/fetch_datatable_allinone", methods=["POST"])
+def fetch_datatable_allinone():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = "Z03_SFG_FG_ID_Linkage"  # 👈 Table name
+        barcode = body.get("barcode")
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+        page = max(int(body.get("page", 1)), 1)
+        limit = min(int(body.get("limit", 100)), 1000)
+        offset = (page - 1) * limit
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+        elif barcode:
+            filters.append("FGNumber = :barcode")
+            params["barcode"] = barcode
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+        # Paginated data query
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+
+        with engine_zone03.connect() as conn:
+            total = conn.execute(count_query, params).scalar()
+
+            # 🔹 get cursor description to preserve column order
+            result = conn.execute(query, {**params, "offset": offset, "limit": limit})
+            columns = result.keys()  # ordered list of columns
+            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        def format_datetime(value):
+            """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
+            # print(value)
+            if isinstance(value, datetime):
+                return value.strftime("%d %b %Y %H:%M:%S")
+            try:
+                # parsed = datetime.fromisoformat(str(value).replace("Z", ""))
+                return value.strftime("%d %b %Y %H:%M:%S")
+            except Exception:
+                return value  # leave unchanged if parsing fails
+
+        def format_float(value):
+            """Format value to 4 decimal places if it's a float or numeric string."""
+            try:
+                # Convert to float once
+                fval = float(value)
+                # Check if original was string and contained a decimal point
+                if (isinstance(value, str) or isinstance(value, float)) or "." in value:
+
+                    return f"{fval:.4f}"
+                else:
+                    return value  # leave ints or non-floats unchanged
+            except (ValueError, TypeError):
+                return value  # leave as is if not numeric
+
+        for row in rows:
+            for k, v in row.items():
+                if k.lower() == "datetime":
+                    row[k] = format_datetime(v)
+                elif isinstance(v, float):
+                    if v == 0.0:
+                        continue  # skip formatting 0.0
+                    if "status" in k.lower():
+                        continue  # skip status fields
+                    row[k] = format_float(v)
+
+        return jsonify({
+            "columns": list(columns),  # 👈 send ordered columns to UI
+            "data": rows,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        })
+    except Exception as e:
+        print("❌ SQL ERROR:", e)
+        return jsonify({"error": f"Query failed: {e}"}), 500
+@app.route("/fetch_allinone_data", methods=["POST"])
+def fetch_allinone_data():
+    try:
+        body = request.get_json(force=True) or {}
+
+        sfg = body.get("sfg_id")
+        m1 = body.get("module01_id")
+        m2 = body.get("module02_id")
+
+        if not any([sfg, m1, m2]):
+            return jsonify({"error": "At least one barcode required"}), 400
+
+        # ---------------------------
+        # BARCODE FILTER
+        # ---------------------------
+        barcode_conditions = []
+        params = {}
+
+        if sfg:
+            barcode_conditions.append("M.Pallet_Identification_Barcode = :sfg")
+            params["sfg"] = sfg
+        if m1:
+            barcode_conditions.append("M.Pallet_Identification_Barcode = :m1")
+            params["m1"] = m1
+        if m2:
+            barcode_conditions.append("M.Pallet_Identification_Barcode = :m2")
+            params["m2"] = m2
+
+        where_sql = " OR ".join(barcode_conditions)
+
+        # ==========================================================
+        # MODULE FORMATION + CELL DATA
+        # ==========================================================
+        module_sql = text(f"""
+        ;WITH LatestCell AS (
+            SELECT *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY Cell_Barcode
+                    ORDER BY 
+                        CASE WHEN Cell_Capacity_Actual = 9999 THEN 1 ELSE 0 END,
+                        Date_Time DESC
+                ) rn
+            FROM ZONE01_REPORTS.dbo.Cell_Report
+        ),
+        ModuleCells AS (
+            SELECT
+                M.Date_Time,
+                M.Shift,
+                M.Operator,
+                M.Module_Type,
+                M.Module_Grade,
+                M.StoredStatus AS Status,
+                M.Pallet_Identification_Barcode AS ModuleBarcodeData,
+                V.Cell_Barcode,
+                ROW_NUMBER() OVER (
+                    PARTITION BY M.Pallet_Identification_Barcode
+                    ORDER BY (SELECT NULL)
+                ) AS Position
+            FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
+            CROSS APPLY (VALUES
+                (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
+                (M.Barcode05),(M.Barcode06),(M.Barcode07),(M.Barcode08),
+                (M.Barcode09),(M.Barcode10),(M.Barcode11),(M.Barcode12),
+                (M.Barcode13),(M.Barcode14),(M.Barcode15),(M.Barcode16)
+            ) V(Cell_Barcode)
+            WHERE V.Cell_Barcode IS NOT NULL
+              AND ({where_sql})
+        )
+        SELECT
+            MC.*,
+            L.Cell_Voltage_Actual,
+            L.Cell_Resistance_Actual
+        FROM ModuleCells MC
+        LEFT JOIN LatestCell L
+            ON MC.Cell_Barcode = L.Cell_Barcode AND L.rn = 1
+        ORDER BY MC.Date_Time DESC, MC.Position
+        """)
+
+        with engine_zone01.connect() as conn:
+            module_rows = conn.execute(module_sql, params).mappings().all()
+
+        if not module_rows:
+            return jsonify({"columns": [], "data": [], "limit": 0})
+
+        # ---------------------------
+        # GROUP BY MODULE
+        # ---------------------------
+        combined = {}
+
+        for r in module_rows:
+            mid = r["ModuleBarcodeData"]
+
+            if mid not in combined:
+                combined[mid] = {
+                    "DateTime": r["Date_Time"].strftime("%d %b %Y %H:%M:%S"),
+                    "Shift": r["Shift"],
+                    "Operator": r["Operator"],
+                    "ModuleBarcodeData": mid,
+                    "Status": r["Status"],
+                    "Position": [],
+                    "Voltage": [],
+                    "Resistance": []
+                }
+
+            combined[mid]["Position"].append(r["Position"])
+            combined[mid]["Voltage"].append(
+                str(round(r["Cell_Voltage_Actual"], 4)) if r["Cell_Voltage_Actual"] else "0"
+            )
+            combined[mid]["Resistance"].append(
+                str(round(r["Cell_Resistance_Actual"], 4)) if r["Cell_Resistance_Actual"] else "0"
+            )
+
+        # ==========================================================
+        # ACIR DATA
+        # ==========================================================
+        acir_sql = text("""
+        SELECT *
+        FROM ZONE02_REPORTS.dbo.ACIR_Testing_Station
+        WHERE ModuleBarcodeData IN :barcodes
+        """)
+
+        barcodes = tuple(combined.keys())
+
+        with engine_zone02.connect() as conn:
+            acir_rows = conn.execute(
+                acir_sql, {"barcodes": barcodes}
+            ).mappings().all()
+
+        for r in acir_rows:
+            mid = r["ModuleBarcodeData"]
+            if mid in combined:
+                combined[mid].update({
+                    "Pack_Level_Resistance": r.get("Pack_Level_Resistance", 0),
+                    "Pack_Level_Voltage": r.get("Pack_Level_Voltage", 0),
+                    "Pack_Level_Resistance_Module02": r.get("Pack_Level_Resistance_Module02", 0),
+                    "Pack_Level_Voltage_Module02": r.get("Pack_Level_Voltage_Module02", 0),
+                    "String_Level_IR_Diff_Max_Min": r.get("String_Level_IR_Diff_Max_Min", 0),
+                    "String_Level_V_Diff_Max_Min": r.get("String_Level_V_Diff_Max_Min", 0),
+                    "Module_Level_Resistance": r.get("Module_Level_Resistance", 0),
+                    "CycleTime": r.get("CycleTime", 0)
+                })
+
+        # ==========================================================
+        # FINAL RESPONSE
+        # ==========================================================
+        columns = [
+            "DateTime","Shift","Operator","ModuleBarcodeData",
+            "Position","Voltage","Resistance",
+            "Pack_Level_Resistance","Pack_Level_Voltage",
+            "Pack_Level_Resistance_Module02","Pack_Level_Voltage_Module02",
+            "String_Level_IR_Diff_Max_Min","String_Level_V_Diff_Max_Min",
+            "Module_Level_Resistance","Status","CycleTime"
+        ]
+
+        return jsonify({
+            "columns": columns,
+            "data": list(combined.values()),
+            "limit": len(combined)
+        })
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# === Export full filtered data to Excel ===
+@app.route("/export_excel_allinone", methods=["POST"])
+def export_excel_allinone():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = "Z03_SFG_FG_ID_Linkage"  # 👈 Table name
+        barcode = body.get("barcode")
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+        if barcode:
+            filters.append("Barcode = :barcode")
+            params["barcode"] = barcode
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+        # Status counts
+        status_query = text(f"""
+            SELECT 
+                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
+            FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+        with engine_zone03.connect() as conn:
+            df = pd.read_sql(query, conn, params=params)
+            dfcount = pd.read_sql(count_query, conn, params=params)
+            dfstats = pd.read_sql(status_query, conn, params=params)
+        # Save Excel inside project exports/
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_station = station_table.replace(" ", "_")
+        filename = f"{safe_station}_{timestamp}.xlsx"
+
+        export_dir = os.path.join(app.root_path, "exports")
+        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+        filepath = os.path.join(export_dir, filename)
+
+        # filepath = os.path.join(export_dir, filename)
+        # df.to_excel(filepath, index=False)
+        # ---- Write Excel with stats on top ----
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count", "Total OK", "Total NG"],
+                "Value": [
+                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                    int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
+                    int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
+                ]
+            })
+            if stats_summary.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+
+        return send_file(filepath, as_attachment=True)
+
+        # return send_file(filepath, as_attachment=True)
+
+    except Exception as e:
+        print("❌ SQL ERROR (Excel):", e)
+        return jsonify({"error": f"Export failed: {e}"}), 500
+
 # -----------------------
 # Run (use Gunicorn/Nginx in prod)
 # -----------------------
 if __name__ == "__main__":
     # For development only. Use gunicorn in production:
     # gunicorn -w 4 -b 0.0.0.0:5000 app:app
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)

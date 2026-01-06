@@ -48,9 +48,7 @@ function getFilters() {
   return {
     start_date: document.getElementById("startDateTime").value,
     end_date: document.getElementById("endDateTime").value,
-    barcode: document.getElementById("barcode")?.value?.trim() || "",
-    station_name: document.getElementById("stationName")?.value || "",
-    shift:document.getElementById("shift")?.value || ""
+    barcode: document.getElementById("barcode")?.value?.trim() || ""
   };
 }
 
@@ -61,7 +59,7 @@ async function loadPage(page = 1) {
   showLoader();
 
   try {
-    const res = await fetch("/fetch_data_zone02", {
+    const res = await fetch("/fetch_datatable_allinone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -91,13 +89,7 @@ async function loadPage(page = 1) {
     state.page = result.page || 1;
     state.totalPages = result.pages || 1;
     rendersummary(result.total || 0, result.total_ok || 0, result.total_ng || 0);
-   
-    if(f["station_name"] === "ACIR_Testing_Station"){
-    
-      renderTableACIR(result.data || [], result.columns || []);
-    } else {
-      renderTable(result.data || [], result.columns || []);
-    }
+    renderTable(result.data || [], result.columns || []);
     renderPageInfo();
 
   } catch (err) {
@@ -108,6 +100,25 @@ async function loadPage(page = 1) {
   }
 }
 
+async function getallinonedata(fgid) {
+  showLoader();
+  try {
+    const res = await fetch("/fetch_allinone_data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fg_id: fgid })
+    });
+    if (!res.ok) throw new Error("Failed to fetch all-in-one data");
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    renderallinoneTable(result.data || [], result.columns || []);
+  } catch (err) {
+    console.error("Error loading all-in-one data:", err);
+    alert("Failed to load all-in-one data: " + err.message);
+  } finally {
+    hideLoader();
+  }
+}
 function renderPageInfo() {
   const el = document.getElementById("pageInfo");
   if (el) el.textContent = `Page ${state.page} of ${state.totalPages}`;
@@ -121,6 +132,7 @@ function rendersummary(total, total_ok, total_ng) {
   if (totalOkEl) totalOkEl.textContent = total_ok;
   if (totalNgEl) totalNgEl.textContent = total_ng;
 }
+
 // === Render Table ===
 function renderTable(data, columns) {
   const table = document.getElementById("dataTable");
@@ -135,7 +147,38 @@ function renderTable(data, columns) {
         headRow.appendChild(th);
     });
     thead.appendChild(headRow);
+    // call the rendering for all-in-one table for first row data only
+    const fgid = data[0]["FGID"];
+    getallinonedata(fgid);
+    // --- Table Body ---
+    const tbody = document.createElement("tbody");
+    data.forEach(row => {
 
+        const tr = document.createElement("tr");
+        columns.forEach(col => {
+            const td = document.createElement("td");
+            td.textContent = row[col] !== null ? row[col] : "";
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+}
+
+function renderallinoneTable(data, columns) {
+  const table = document.getElementById("all-in-one-dataTable");
+    table.innerHTML = "";
+    // --- Table Head ---
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    columns.forEach(col => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
     // --- Table Body ---
     const tbody = document.createElement("tbody");
     data.forEach(row => {
@@ -151,85 +194,13 @@ function renderTable(data, columns) {
     table.appendChild(thead);
     table.appendChild(tbody);
 }
-// === Render Table ===
-function renderTableACIR(data, columns) {
-  const table = document.getElementById("dataTable");
-  table.innerHTML = "";
-
-  // --- Table Head ---
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  columns.forEach(col => {
-    const th = document.createElement("th");
-    th.textContent = col;
-    headRow.appendChild(th);
-  });
-  
-
-
-  thead.appendChild(headRow);
-
-  // --- Table Body ---
-  const tbody = document.createElement("tbody");
-
-  data.forEach(row => {
-    const tr = document.createElement("tr");
-
-    columns.forEach(col => {
-      const td = document.createElement("td");
-      
-      // --- Special handling for ACIR arrays ---
-      if (["Position", "Voltage", "Resistance"].includes(col) && Array.isArray(row[col])) {
-        // Make a mini-table inside cell
-        const innerTable = document.createElement("table");
-        innerTable.style.borderCollapse = "collapse";
-        row[col].forEach((val, idx) => {
-          const innerRow = document.createElement("tr");
-          const innerCell = document.createElement("td");
-          innerCell.textContent = val;
-          innerCell.style.border = "1px solid #ccc";
-          innerCell.style.padding = "2px 4px";
-          innerRow.appendChild(innerCell);
-          innerTable.appendChild(innerRow);
-        });
-        const innerRow1 = document.createElement("tr");
-        const innerCell1 = document.createElement("td");
-        const innerRow2 = document.createElement("tr");
-        const innerCell2 = document.createElement("td");
-        if(col === "Position") innerCell1.textContent = "Final_1";
-        if(col === "Position") innerCell2.textContent = "Final_2";
-        if(col === "Voltage") innerCell1.textContent = row["FinalVoltage1"];
-        if(col === "Voltage") innerCell2.textContent = row["FinalVoltage2"];
-        if(col === "Resistance") innerCell1.textContent = row["FinalResistance1"];
-        if(col === "Resistance") innerCell2.textContent = row["FinalResistance2"];
-
-        innerRow1.appendChild(innerCell1);
-        innerRow2.appendChild(innerCell2);
-        innerTable.appendChild(innerRow1);
-        innerTable.appendChild(innerRow2);
-        
-        td.appendChild(innerTable);
-      } else {
-        td.textContent = row[col] !== null ? row[col] : "";
-      }
-
-      tr.appendChild(td);
-    });
-
-    tbody.appendChild(tr);
-  });
-
-  table.appendChild(thead);
-  table.appendChild(tbody);
-}
-
 // === Export ===
 async function startExport() {
   const f = state.lastFilters;
   showLoader();
 
   try {
-    const res = await fetch("/export_excel_allinone", {
+    const res = await fetch("/export_excel_zone03", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(f)
@@ -268,6 +239,7 @@ function showLoader() {
 function hideLoader() {
   document.getElementById("logoProgress").style.display = "none";
 }
+
 // Navigate to zone01 cell dashboard (kept)
 function celldashboard() {
   window.location = "/";
@@ -286,7 +258,7 @@ function zone02dashboard() {
 }
 // Navigate to model dashboard (kept)
 function zone03dashboard() {
-  window.location = "zone03_dashboard";
+  window.location = "/zone03_dashboard";
 }
 // Navigate to combined statistics page
 function combinedstatistics() {

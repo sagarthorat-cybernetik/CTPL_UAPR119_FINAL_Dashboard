@@ -308,6 +308,9 @@ function celldashboard() {
 function modeldashboard() {
   window.location = "modeldashboard";
 }
+function allinonedashboard() {
+  window.location = "allinonedashboard";
+}
 // Navigate to zone01 dashboard (kept)
 function zone01dashboard() {
   window.location = "/";

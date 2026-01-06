@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone 2 Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../static/images/logo.png">
+    <link rel="stylesheet" href="{{ url_for('static', filename='./css/styles.css') }}">
+    <link rel="stylesheet" href="../static/css/styles.css">
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body> 
+    <header>
+        <!-- <img src="{{url_for('static', filename='./images/CTPL Logo.bmp')}}" alt=""> -->
+        <!-- <img src="../static/images/logo.png" class="logo" alt=""> -->
+        <div class="bothlogo">
+            <img src="../static/images/logo.svg" alt="logo" class="logo">
+            <img src="../static/images/cylogo.png" alt="logo" class="logo">
+        </div>
+        <h1>All-In-One Dashboard</h1>
+        <div class="zones">
+            <button id="zone01dashboard" onclick="zone01dashboard()">Zone 01 Dashboard</button>
+            <button id="zone02dashboard" onclick="zone02dashboard()">Zone 02 Dashboard</button>
+            <button id="zone03dashboard" onclick="zone03dashboard()">Zone 03 Dashboard</button>
+        </div>
+
+    </header>
+    <div class="dashboard">
+       
+        <!-- Filters -->
+        <div class="filters">
+            <div class="eachfilter">
+                <label for="startDateTime">Start DateTime:</label>
+                <input type="datetime-local" id="startDateTime" >
+                <br>
+                <br>
+                <label for="endDateTime">End DateTime:</label>
+                <input type="datetime-local" id="endDateTime">
+            </div>
+                
+            <div class="eachfilter">
+
+                <label for="barcode">Barcode:</label>
+                <input type="text" id="barcode" placeholder="Enter Barcode">
+            </div>
+              
+        </div>
+        <div class="titletabels">
+            <!-- Export Button -->
+            <button id="searchBtn" class="btn-search">🔍 Search</button>
+            <button id="exportBtn">Download Excel</button>
+        </div>
+                <!-- Logo Progress Loader -->
+        <div id="logoProgress" class="logo-progress" style="display:none;">
+            <img src="../static/images/logo.png" alt="logo">
+            <div class="ring"></div>
+            <!-- <div id="progressText" class="progress-text">0%</div> -->
+        </div>
+        <!-- Tables for Data Counts -->
+        <div class="tables-containers">
+                        <!-- NG Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>Total</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total</td><td id="total">0</td></tr>
+                </tbody>
+            </table>
+            <!-- OK Cells Table -->
+            <table class="stats-table">
+                <thead>
+                    <tr><th>OK  Report</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Total OK</td><td id="totalok">0</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Data Table -->
+        <h2>All-In-One Table</h2>
+        <div class="table-container">
+            <table id="all-in-one-dataTable">
+                
+            </table>
+        </div>
+        <!-- Filtered Data Table -->
+        <h2>Filtered Data</h2>
+        <!-- Pagination Info -->
+        <div id="paginationControls" class="pagination-controls">
+            <button id="prevPage">⬅ Prev</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage">Next ➡</button>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                
+            </table>
+        </div>
+
+
+    </div>
+
+    <!-- <script src="../static/js/script.js"></script> -->
+    <script src="{{ url_for('static', filename='./js/allinone.js') }}"></script>
+</body>
+</html>
