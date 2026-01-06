@@ -2409,7 +2409,7 @@ def fetch_datatable_allinone():
         """)
 
 
-        with engine_zone03.connect() as conn:
+        with engine_zone02.connect() as conn:
             total = conn.execute(count_query, params).scalar()
 
             # 🔹 get cursor description to preserve column order
@@ -2673,7 +2673,7 @@ def export_excel_allinone():
             WHERE {where_clause}
         """)
 
-        with engine_zone03.connect() as conn:
+        with engine_zone02.connect() as conn:
             df = pd.read_sql(query, conn, params=params)
             dfcount = pd.read_sql(count_query, conn, params=params)
             dfstats = pd.read_sql(status_query, conn, params=params)
