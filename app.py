@@ -2518,15 +2518,15 @@ def export_combined_statistics_worker(task_id, args):
         # ZONE 2 HOURLY
         # ======================
         elif zone == "zone2":
-            stations = [
-                "ACIR_Testing_Station",
-                "Laser_Welding_Station",
-                "Negative_Temp_Check_Station",
-                "Polarity_Check_Station",
-                "Routing_Station01",
-                "Routing_Station02",
-                "Routing_Station03"
-            ]
+            # stations = [
+            #     "ACIR_Testing_Station",
+            #     "Laser_Welding_Station",
+            #     "Negative_Temp_Check_Station",
+            #     "Polarity_Check_Station",
+            #     "Routing_Station01",
+            #     "Routing_Station02",
+            #     "Routing_Station03"
+            # ]
 
             with engine_zone02.connect() as conn:
                 for st in stations:
@@ -2607,12 +2607,12 @@ def export_combined_statistics_worker(task_id, args):
         # ZONE 3 HOURLY
         # ======================
         elif zone == "zone3":
-            stations = [
-                "Leak_Test_Stn",
-                "Weighing_Station",
-                "EOL_Testing_Station",
-                "PDI_Station"
-            ]
+            # stations = [
+            #     "Leak_Test_Stn",
+            #     "Weighing_Station",
+            #     "EOL_Testing_Station",
+            #     "PDI_Station"
+            # ]
 
             with engine_zone03.connect() as conn:
                 for st in stations:
