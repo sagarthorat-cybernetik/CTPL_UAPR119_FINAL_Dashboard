@@ -4069,9 +4069,9 @@ def export_excel_allinone_worker(task_id, args):
         # 3️⃣ MODULE (ZONE01) – FILTERED BY BARCODES
         # ======================================================
         if all_barcodes:
-            # Create parameterized query for barcodes
-            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
-            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
+            # Use tuple format for IN clause
+            barcode_tuple = tuple(all_barcodes)
+            barcode_placeholder = ','.join(['?' for _ in all_barcodes])
 
             module_sql = f"""
             ;WITH LatestCell AS (
@@ -4105,12 +4105,12 @@ def export_excel_allinone_worker(task_id, args):
                     M.Barcode41, M.Barcode42, M.Barcode43, M.Barcode44,
                     M.Barcode45, M.Barcode46, M.Barcode47, M.Barcode48
                 )
-            WHERE L.rn = 1 AND M.Pallet_Identification_Barcode IN ({barcode_placeholders})
+            WHERE L.rn = 1 AND M.Pallet_Identification_Barcode IN ({barcode_placeholder})
             GROUP BY M.Pallet_Identification_Barcode
             """
 
             with engine.connect() as conn:
-                module_df = pd.read_sql(text(module_sql), conn, barcode_params)
+                module_df = pd.read_sql(module_sql, conn, params=barcode_tuple)
         else:
             module_df = pd.DataFrame()
 
@@ -4122,8 +4122,8 @@ def export_excel_allinone_worker(task_id, args):
         # 4️⃣ ACIR (ZONE02) – FILTERED BY BARCODES
         # ======================================================
         if all_barcodes:
-            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
-            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
+            barcode_tuple = tuple(all_barcodes)
+            barcode_placeholder = ','.join(['?' for _ in all_barcodes])
 
             acir_sql = f"""
             SELECT *
@@ -4132,12 +4132,12 @@ def export_excel_allinone_worker(task_id, args):
                     PARTITION BY ModuleBarcodeData ORDER BY DateTime DESC
                 ) rn
                 FROM ACIR_Testing_Station
-                WHERE ModuleBarcodeData IN ({barcode_placeholders})
+                WHERE ModuleBarcodeData IN ({barcode_placeholder})
             ) t WHERE rn = 1
             """
 
             with engine_zone02.connect() as conn:
-                acir_df = pd.read_sql(text(acir_sql), conn, barcode_params)
+                acir_df = pd.read_sql(acir_sql, conn, params=barcode_tuple)
         else:
             acir_df = pd.DataFrame()
 
@@ -4149,8 +4149,8 @@ def export_excel_allinone_worker(task_id, args):
         # 5️⃣ LEAK + WEIGHT (ZONE03) – FILTERED BY BARCODES
         # ======================================================
         if all_barcodes:
-            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
-            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
+            barcode_tuple = tuple(all_barcodes)
+            barcode_placeholder = ','.join(['?' for _ in all_barcodes])
 
             leak_sql = f"""
                 SELECT *
@@ -4159,7 +4159,7 @@ def export_excel_allinone_worker(task_id, args):
                         PARTITION BY FGBarcodeData ORDER BY DateTime DESC
                     ) rn
                     FROM Leak_Test_Stn
-                    WHERE FGBarcodeData IN ({barcode_placeholders})
+                    WHERE FGBarcodeData IN ({barcode_placeholder})
                 ) t WHERE rn = 1
             """
 
@@ -4170,12 +4170,12 @@ def export_excel_allinone_worker(task_id, args):
                         PARTITION BY FGBarcode_Data ORDER BY DateTime DESC
                     ) rn
                     FROM Weighing_Station
-                    WHERE FGBarcode_Data IN ({barcode_placeholders})
+                    WHERE FGBarcode_Data IN ({barcode_placeholder})
                 ) t WHERE rn = 1
             """
 
-            leak_df = pd.read_sql(text(leak_sql), engine_zone03, barcode_params)
-            weight_df = pd.read_sql(text(weight_sql), engine_zone03, barcode_params)
+            leak_df = pd.read_sql(leak_sql, engine_zone03, params=barcode_tuple)
+            weight_df = pd.read_sql(weight_sql, engine_zone03, params=barcode_tuple)
         else:
             leak_df = pd.DataFrame()
             weight_df = pd.DataFrame()
