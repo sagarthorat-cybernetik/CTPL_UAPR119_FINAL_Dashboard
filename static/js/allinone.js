@@ -232,29 +232,19 @@ async function startExport() {
   showLoader();
 
   try {
-    const res = await fetch("/export_excel_allinone", {
+    // Start the export task
+    const startRes = await fetch("/export_excel_allinone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(f)
     });
 
-    if (!res.ok) throw new Error("Export failed");
+    if (!startRes.ok) throw new Error("Export failed to start");
 
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
+    const { task_id } = await startRes.json();
 
-    const cd = res.headers.get("Content-Disposition");
-    let filename = "export.xlsx";
-    if (cd && cd.includes("filename=")) {
-      filename = cd.split("filename=")[1].replace(/["']/g, "");
-    }
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // Poll for completion
+    await pollExportStatus(task_id);
 
   } catch (err) {
     console.error("Error exporting:", err);
@@ -262,6 +252,54 @@ async function startExport() {
   } finally {
     hideLoader();
   }
+}
+
+async function pollExportStatus(task_id) {
+  return new Promise((resolve, reject) => {
+    const poll = async () => {
+      try {
+        const res = await fetch(`/export_excel_allinone/status?task_id=${task_id}`);
+        if (!res.ok) throw new Error("Status check failed");
+
+        const status = await res.json();
+
+        if (status.error) {
+          throw new Error(status.error);
+        }
+
+        if (status.done) {
+          // Download the file
+          const downloadRes = await fetch(`/export_excel_allinone/download?task_id=${task_id}`);
+          if (!downloadRes.ok) throw new Error("Download failed");
+
+          const blob = await downloadRes.blob();
+          const url = window.URL.createObjectURL(blob);
+
+          const cd = downloadRes.headers.get("Content-Disposition");
+          let filename = "export.xlsx";
+          if (cd && cd.includes("filename=")) {
+            filename = cd.split("filename=")[1].replace(/["']/g, "");
+          }
+
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+
+          resolve();
+        } else {
+          // Continue polling
+          setTimeout(poll, 2000);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    poll();
+  });
 }
 
 // === Loader ===
