@@ -234,7 +234,8 @@ async function exportCurrentZone() {
     const endDateTime = document.getElementById('endDateTime').value;
 
     try {
-        const response = await fetch('/api/combined_statistics/export', {
+        // Start export
+        const startResponse = await fetch('/api/combined_statistics/export', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -246,12 +247,41 @@ async function exportCurrentZone() {
             })
         });
 
-        if (!response.ok) {
-            throw new Error('Export failed');
+        if (!startResponse.ok) {
+            throw new Error('Failed to start export');
+        }
+
+        const startData = await startResponse.json();
+        const taskId = startData.task_id;
+
+        // Poll for status
+        let progress = 0;
+        while (progress < 100) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+
+            const statusResponse = await fetch(`/api/combined_statistics/export/status?task_id=${taskId}`);
+            if (!statusResponse.ok) {
+                throw new Error('Failed to check export status');
+            }
+
+            const statusData = await statusResponse.json();
+            progress = statusData.progress;
+
+            if (statusData.error) {
+                throw new Error(statusData.error);
+            }
+
+            // Update UI with progress if needed
+            console.log(`Export progress: ${progress}%`);
         }
 
         // Download file
-        const blob = await response.blob();
+        const downloadResponse = await fetch(`/api/combined_statistics/export/download?task_id=${taskId}&zone=${currentZone}`);
+        if (!downloadResponse.ok) {
+            throw new Error('Failed to download file');
+        }
+
+        const blob = await downloadResponse.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -281,7 +311,8 @@ async function exportAllZones() {
     document.getElementById('loadingIndicator').style.display = 'block';
 
     try {
-        const response = await fetch('/api/combined_statistics/export_all', {
+        // Start export
+        const startResponse = await fetch('/api/combined_statistics/export_all', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -292,22 +323,57 @@ async function exportAllZones() {
             })
         });
 
-        document.getElementById('loadingIndicator').style.display = 'none';
-
-        if (!response.ok) {
-            throw new Error('Export failed');
+        if (!startResponse.ok) {
+            throw new Error('Failed to start export');
         }
 
-        // Download file
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `all_zones_statistics_${new Date().getTime()}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        const { task_id } = await startResponse.json();
+
+        // Poll for status
+        const pollStatus = async () => {
+            try {
+                const statusResponse = await fetch(`/api/combined_statistics/export_all/status?task_id=${task_id}`);
+                if (!statusResponse.ok) {
+                    throw new Error('Failed to check status');
+                }
+
+                const status = await statusResponse.json();
+
+                if (status.error) {
+                    throw new Error(status.error);
+                }
+
+                if (status.done) {
+                    // Download file
+                    const downloadResponse = await fetch(`/api/combined_statistics/export_all/download?task_id=${task_id}`);
+                    if (!downloadResponse.ok) {
+                        throw new Error('Failed to download file');
+                    }
+
+                    const blob = await downloadResponse.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `all_zones_statistics_${new Date().getTime()}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                } else {
+                    // Continue polling
+                    setTimeout(pollStatus, 2000);
+                }
+            } catch (error) {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                showError('Export failed: ' + error.message);
+                console.error('Export error:', error);
+            }
+        };
+
+        // Start polling
+        setTimeout(pollStatus, 2000);
 
     } catch (error) {
         document.getElementById('loadingIndicator').style.display = 'none';

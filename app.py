@@ -1342,15 +1342,29 @@ def fetch_data_zone02():
 # === Export full filtered data to Excel ===
 @app.route("/export_excel_zone02", methods=["POST"])
 def export_excel_zone02():
+    """Start background export for zone02 data. Returns a task_id to poll."""
+    args = request.get_json(force=True) or {}
+    task_id = uuid4().hex
+    EXPORT_TASKS[task_id] = {"progress": 0, "file": None, "done": False, "error": None}
+    t = Thread(target=export_excel_zone02_worker, args=(task_id, args), daemon=True)
+    t.start()
+    return jsonify({"task_id": task_id})
+
+
+def export_excel_zone02_worker(task_id, args):
+    """Background worker for zone02 Excel export"""
     try:
-        body = request.get_json(force=True) or {}
-        station_table = body.get("station_name")  # 👈 Table name
-        barcode = body.get("barcode")
-        start_date = parse_date(body.get("start_date"))
-        end_date = parse_date(body.get("end_date"))
+        station_table = args.get("station_name")  # 👈 Table name
+        barcode = args.get("barcode")
+        start_date = parse_date(args.get("start_date"))
+        end_date = parse_date(args.get("end_date"))
 
         if not station_table:
-            return jsonify({"error": "station_name (table) is required"}), 400
+            EXPORT_TASKS[task_id]["error"] = "station_name (table) is required"
+            EXPORT_TASKS[task_id]["done"] = True
+            return
+
+        EXPORT_TASKS[task_id]["progress"] = 10
 
         # Build filters
         filters, params = [], {}
@@ -1427,6 +1441,8 @@ def export_excel_zone02():
                             ) grouped
                         """)
 
+        EXPORT_TASKS[task_id]["progress"] = 30
+
         with engine_zone02.connect() as conn:
             df = pd.read_sql(query, conn, params=params)
             if station_table == "Tracebility_Table" or station_table == "Cell_Depth_Report":
@@ -1435,6 +1451,8 @@ def export_excel_zone02():
             else:
                 dfcount = pd.read_sql(count_query, conn, params=params)
                 dfstats = pd.read_sql(status_query, conn, params=params)
+
+        EXPORT_TASKS[task_id]["progress"] = 60
 
         # Save Excel inside project exports/
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1474,12 +1492,32 @@ def export_excel_zone02():
             else:
                 df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
 
-        return send_file(filepath, as_attachment=True)
-        # return send_file(filepath, as_attachment=True)
+        EXPORT_TASKS[task_id]["progress"] = 100
+        EXPORT_TASKS[task_id]["file"] = filepath
+        EXPORT_TASKS[task_id]["done"] = True
 
     except Exception as e:
-        print("❌ SQL ERROR (Excel):", e)
-        return jsonify({"error": f"Export failed: {e}"}), 500
+        EXPORT_TASKS[task_id]["error"] = str(e)
+        EXPORT_TASKS[task_id]["done"] = True
+        EXPORT_TASKS[task_id]["progress"] = 100
+
+
+@app.route("/export_excel_zone02/status")
+def export_excel_zone02_status():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify({"progress": t["progress"], "done": t["done"], "error": t["error"]})
+
+
+@app.route("/export_excel_zone02/download")
+def export_excel_zone02_download():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t or not t.get("file") or not os.path.exists(t["file"]):
+        return jsonify({"error": "File not ready or not found"}), 404
+    return send_file(t["file"], as_attachment=True)
 
 
 # -----------------------
@@ -2085,30 +2123,274 @@ def api_combined_statistics():
 
 @app.route("/api/combined_statistics/export", methods=["POST"])
 def api_combined_statistics_export():
-    """Export combined statistics to Excel"""
+    """Start background export for combined statistics. Returns a task_id to poll."""
+    args = request.get_json(force=True) or {}
+    task_id = uuid4().hex
+    EXPORT_TASKS[task_id] = {"progress": 0, "file": None, "done": False, "error": None}
+    t = Thread(target=export_combined_statistics_worker, args=(task_id, args), daemon=True)
+    t.start()
+    return jsonify({"task_id": task_id})
+
+
+def export_combined_statistics_worker(task_id, args):
+    """Background worker for combined statistics export"""
     try:
-        body = request.get_json(force=True) or {}
-        zone = body.get("zone", "zone1")
-        start = body.get("start_date")
-        end = body.get("end_date")
+        zone = args.get("zone", "zone1")
+        start = args.get("start_date")
+        end = args.get("end_date")
 
         start_dt = parse_date(start) if start else None
         end_dt = parse_date(end) if end else None
 
         if not start_dt or not end_dt:
-            return jsonify({"error": "start_date and end_date are required"}), 400
+            EXPORT_TASKS[task_id]["error"] = "start_date and end_date are required"
+            EXPORT_TASKS[task_id]["done"] = True
+            return
+
+        EXPORT_TASKS[task_id]["progress"] = 10
+
         # 🔹 Hourly report only for start day
         hour_start = start_dt.replace(hour=0, minute=0, second=0)
         hour_end = start_dt.replace(hour=23, minute=59, second=59)
         hour_params = {"start": hour_start, "end": hour_end}
+        params = {"start": start_dt, "end": end_dt}
+
         # Create workbook
         wb = Workbook()
         wb.remove(wb.active)  # Remove default sheet
 
-        # Get data for the zone
-        stats_response = api_combined_statistics()
-        stats_data = stats_response.get_json()
+        EXPORT_TASKS[task_id]["progress"] = 20
 
+        # Get data for the zone (simulate the api_combined_statistics logic)
+        if zone == "zone1":
+            # Zone 1: Cell and Module statistics
+            with engine.connect() as conn:
+                # Cell statistics
+                cell_query = text("""
+                    SELECT 
+                        COUNT(*) AS total_cells,
+                        SUM(CASE WHEN Cell_Final_Status = 1 THEN 1 ELSE 0 END) AS ok_cells,
+                        SUM(CASE WHEN Cell_Final_Status = 0 THEN 1 ELSE 0 END) AS ng_cells
+                    FROM [ZONE01_REPORTS].[dbo].[Cell_Report]
+                    WHERE Date_Time BETWEEN :start AND :end
+                """)
+                cell_stats = conn.execute(cell_query, params).mappings().first() or {}
+
+                # Module statistics
+                module_query = text("""
+                     SELECT 
+                      COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
+                    SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
+                    SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
+                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
+                FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
+                WHERE Date_Time BETWEEN :start AND :end
+                """)
+                module_stats = conn.execute(module_query, params).mappings().first() or {}
+
+            stats_data = {
+                "zone": "zone1",
+                "cells": {
+                    "total": cell_stats.get("total_cells", 0),
+                    "ok": cell_stats.get("ok_cells", 0),
+                    "ng": cell_stats.get("ng_cells", 0)
+                },
+                "modules": {
+                    "total": module_stats.get("total_modules", 0),
+                    "ok": module_stats.get("ok_modules", 0),
+                    "ng": module_stats.get("ng_modules", 0),
+                    "inprogress": module_stats.get("inprogress_modules", 0)
+                }
+            }
+
+        elif zone == "zone2":
+            # Zone 2: Station-wise statistics
+            stations = [
+                "ACIR_Testing_Station",
+                "Laser_Welding_Station",
+                "Negative_Temp_Check_Station",
+                "Polarity_Check_Station",
+                "Routing_Station01",
+                "Routing_Station02",
+                "Routing_Station03",
+                "Top_Cell_Holder_Place_Station",
+                "Visual_Inspection_Station",
+                "Welding_Fixture_Loading_Station",
+                "Wire_Harness_Fixing_Station",
+                "Soldering_Station",
+                "PlasmaCleaning_Stn",
+                "UltrasonicFusion_Stn"
+            ]
+
+            station_stats = []
+            with engine_zone02.connect() as conn:
+                for station in stations:
+                    try:
+                        # Special handling for certain stations
+                        if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+                            query = text(f"""
+                                SELECT
+                                    COUNT(ModuleBarcodeData) as total,
+                                    SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                    SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                    AVG(avg_cycle_time_per_module) AS avg_cycle_time
+                                FROM (
+                                    SELECT ModuleBarcodeData,
+                                           MIN(Status01) as min_status,
+                                           MAX(Status01) as max_status,
+                                            AVG(
+                                                CASE 
+                                                    WHEN CycleTime BETWEEN 60 AND 360 
+                                                    THEN CycleTime 
+                                                    ELSE NULL 
+                                                END
+                                            ) AS avg_cycle_time_per_module
+                                    FROM [{station}]
+                                    WHERE [DateTime] BETWEEN :start AND :end
+                                    GROUP BY ModuleBarcodeData
+                                ) grouped
+                            """)
+                        elif station == "Laser_Welding_Station":
+                            query = text(f"""
+                                SELECT 
+                                    COUNT(DISTINCT ModuleBarcodeData) as total,
+                                    SUM(CASE WHEN min_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                    SUM(CASE WHEN min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                     AVG(avg_cycle_time_per_module) AS avg_cycle_time
+                                FROM (
+                                    SELECT ModuleBarcodeData,
+                                           MIN(WeldStatus) as min_status,
+                                            AVG(
+                                                CASE 
+                                                    WHEN CycleTime BETWEEN 60 AND 360 
+                                                    THEN CycleTime 
+                                                    ELSE NULL 
+                                                END
+                                            ) AS avg_cycle_time_per_module
+                                    FROM [{station}]
+                                    WHERE [DateTime] BETWEEN :start AND :end
+                                    GROUP BY ModuleBarcodeData
+                                ) grouped
+                            """)
+                        else:
+                            query = text(f"""
+                                SELECT 
+                                    COUNT(*) as total,
+                                    SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                    SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                   AVG(
+                                        CASE 
+                                            WHEN CycleTime BETWEEN 60 AND 360 
+                                            THEN CycleTime 
+                                            ELSE NULL 
+                                        END
+                                    ) AS avg_cycle_time
+                                FROM [{station}]
+                                WHERE [DateTime] BETWEEN :start AND :end
+                            """)
+
+                        row = conn.execute(query, params).mappings().first() or {}
+                        result = dict(row) if row else {}
+
+                        # Safe defaults
+                        total_ok = result.get("total_ok", 0) or 0
+                        total_ng = result.get("total_ng", 0) or 0
+                        total = result.get("total", 0) or 0
+                        avg_cycle_time = result.get("avg_cycle_time", 0) or 0
+                        station_stats.append({
+                            "station": station,
+                            "total": total,
+                            "ok": total_ok,
+                            "ng": total_ng,
+                            "avgcytime" : avg_cycle_time,
+                        })
+                    except Exception as e:
+                        print(f"Error querying {station}: {e}")
+                        station_stats.append({
+                            "station": station,
+                            "total": 0,
+                            "ok": 0,
+                            "ng": 0,
+                            "avgcytime" : 0,
+                        })
+
+            stats_data = {
+                "zone": "zone2",
+                "stations": station_stats
+            }
+
+        elif zone == "zone3":
+            # Zone 3: Station-wise statistics
+            stations = [
+                "BatteryPackInsertion",
+                "BMS_Conn_Stn",
+                "BotmPlate_Tight_Stn",
+                "EOL_Testing_Station",
+                "Housing_Ins_Stn",
+                "HRD_Test_Stn",
+                "Laser_Mark_Stn",
+                "Leak_Test_Stn",
+                "PCM_Filling_Station",
+                "PDI_Station",
+                "Top_Cover_Close_Stn",
+                "TopCover_Attach_Stn",
+                "Weighing_Station",
+                "RoutinGlueingSt"
+            ]
+
+            station_stats = []
+            with engine_zone03.connect() as conn:
+                for station in stations:
+                    try:
+                        query = text(f"""
+                            SELECT 
+                                COUNT(*) as total,
+                                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                AVG(
+                                    CASE 
+                                        WHEN CycleTime BETWEEN 60 AND 360 
+                                        THEN CycleTime 
+                                        ELSE NULL 
+                                    END
+                                ) AS avg_cycle_time
+                            FROM [ZONE03_REPORTS].[dbo].[{station}]
+                            WHERE [DateTime] BETWEEN :start AND :end
+                        """)
+
+                        row = conn.execute(query, params).mappings().first() or {}
+                        result = dict(row) if row else {}
+
+                        # Safe defaults
+                        total_ok = result.get("total_ok", 0) or 0
+                        total_ng = result.get("total_ng", 0) or 0
+                        total = result.get("total", 0) or 0
+                        avg_cycle_time = result.get("avg_cycle_time",0) or 0
+                        station_stats.append({
+                            "station": station,
+                            "total": total,
+                            "ok": total_ok,
+                            "ng": total_ng,
+                            "avgcytime": avg_cycle_time
+                        })
+                    except Exception as e:
+                        print(f"Error querying {station}: {e}")
+                        station_stats.append({
+                            "station": station,
+                            "total": 0,
+                            "ok": 0,
+                            "ng": 0,
+                            "avgcytime": 0
+                        })
+
+            stats_data = {
+                "zone": "zone3",
+                "stations": station_stats
+            }
+
+        EXPORT_TASKS[task_id]["progress"] = 40
+
+        # Create the statistics sheet
         if zone == "zone1":
             # Zone 1 sheet
             ws = wb.create_sheet(f"Zone 1 Statistics")
@@ -2148,6 +2430,9 @@ def api_combined_statistics_export():
                     station["ng"],
                     station["avgcytime"]
                 ])
+
+        EXPORT_TASKS[task_id]["progress"] = 60
+
         # ======================================================
         # HOURLY REPORT SHEET
         # ======================================================
@@ -2214,7 +2499,6 @@ def api_combined_statistics_export():
             mod_ng_row = normalize(mod_ng)
             mod_ip_row = normalize(mod_inprogress)
 
-
             mod_total_row = [
                 mod_ok_row[i] + mod_ng_row[i] + mod_ip_row[i]
                 for i in range(24)
@@ -2229,7 +2513,6 @@ def api_combined_statistics_export():
             ws_hr.append(["MODULE NG"] + mod_ng_row)
             ws_hr.append(["MODULE INPROGRESS"] + mod_ip_row)
             ws_hr.append(["MODULE TOTAL"] + mod_total_row)
-
 
         # ======================
         # ZONE 2 HOURLY
@@ -2357,39 +2640,75 @@ def api_combined_statistics_export():
                     ws_hr.append(["OK"] + ok_row)
                     ws_hr.append(["NG"] + ng_row)
                     ws_hr.append(["TOTAL"] + total_row)
-        # Save to temp file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        wb.save(temp_file.name)
-        temp_file.close()
 
-        current_datetime = datetime.now().strftime("%d%m%Y_%H%M%S")
-        return send_file(
-            temp_file.name,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            as_attachment=True,
-            download_name=f"{zone}_statistics_{current_datetime}.xlsx"
-        )
+        EXPORT_TASKS[task_id]["progress"] = 80
+
+        # Save to temp file
+        tmpdir = tempfile.gettempdir()
+        filepath = os.path.join(tmpdir, f"combined_stats_{task_id}.xlsx")
+        wb.save(filepath)
+
+        EXPORT_TASKS[task_id]["progress"] = 100
+        EXPORT_TASKS[task_id]["file"] = filepath
+        EXPORT_TASKS[task_id]["done"] = True
 
     except Exception as e:
-        print("❌ Error exporting combined statistics:", e)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        EXPORT_TASKS[task_id]["error"] = str(e)
+        EXPORT_TASKS[task_id]["done"] = True
+        EXPORT_TASKS[task_id]["progress"] = 100
+
+
+@app.route("/api/combined_statistics/export/status")
+def api_combined_statistics_export_status():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify({"progress": t["progress"], "done": t["done"], "error": t["error"]})
+
+
+@app.route("/api/combined_statistics/export/download")
+def api_combined_statistics_export_download():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t or not t.get("file") or not os.path.exists(t["file"]):
+        return jsonify({"error": "File not ready or not found"}), 404
+    current_datetime = datetime.now().strftime("%d%m%Y_%H%M%S")
+    zone = request.args.get("zone", "zone1")  # Assuming zone is passed or stored
+    return send_file(
+        t["file"],
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"{zone}_statistics_{current_datetime}.xlsx"
+    )
 
 
 @app.route("/api/combined_statistics/export_all", methods=["POST"])
 def api_combined_statistics_export_all():
-    """Export all zones statistics to a single Excel file"""
+    """Start background export for all zones statistics. Returns a task_id to poll."""
+    args = request.get_json(force=True) or {}
+    task_id = uuid4().hex
+    EXPORT_TASKS[task_id] = {"progress": 0, "file": None, "done": False, "error": None}
+    t = Thread(target=export_all_combined_statistics_worker, args=(task_id, args), daemon=True)
+    t.start()
+    return jsonify({"task_id": task_id})
+
+
+def export_all_combined_statistics_worker(task_id, args):
+    """Background worker for all zones statistics export"""
     try:
-        body = request.get_json(force=True) or {}
-        start = body.get("start_date")
-        end = body.get("end_date")
+        start = args.get("start_date")
+        end = args.get("end_date")
 
         start_dt = parse_date(start) if start else None
         end_dt = parse_date(end) if end else None
 
         if not start_dt or not end_dt:
-            return jsonify({"error": "start_date and end_date are required"}), 400
+            EXPORT_TASKS[task_id]["error"] = "start_date and end_date are required"
+            EXPORT_TASKS[task_id]["done"] = True
+            return
+
+        EXPORT_TASKS[task_id]["progress"] = 10
 
         # 🔹 Hourly report uses ONLY start day
         hour_start = start_dt.replace(hour=0, minute=0, second=0)
@@ -2400,6 +2719,8 @@ def api_combined_statistics_export_all():
         # Create workbook
         wb = Workbook()
         wb.remove(wb.active)
+
+        EXPORT_TASKS[task_id]["progress"] = 20
 
         # Zone 1 Data
         with engine.connect() as conn:
@@ -2440,6 +2761,8 @@ def api_combined_statistics_export_all():
         ws1.append(["OK Modules", module_stats.get("ok_modules", 0)])
         ws1.append(["NG Modules", module_stats.get("ng_modules", 0)])
         ws1.append(["In Progress Modules", module_stats.get("inprogress_modules", 0)])
+
+        EXPORT_TASKS[task_id]["progress"] = 30
 
         # Zone 2 Data
         stations_z2 = [
@@ -2543,6 +2866,8 @@ def api_combined_statistics_export_all():
                     print(f"Error: {e}")
                     ws2.append([station.replace("_", " "), 0, 0, 0])
 
+        EXPORT_TASKS[task_id]["progress"] = 50
+
         # Zone 3 Data
         stations_z3 = [
 
@@ -2594,7 +2919,7 @@ def api_combined_statistics_export_all():
                     # Safe defaults
                     total_ok = result.get("total_ok", 0) or 0
                     total_ng = result.get("total_ng", 0) or 0
-                    avg_cycle_time = result.get("avg_cycle_time", 0) or 0
+                    avg_cycle_time = result.get("avg_cycle_time",0) or 0
                     total = result.get("total", 0) or 0
                     ws3.append([
                         station.replace("_", " "),
@@ -2606,6 +2931,9 @@ def api_combined_statistics_export_all():
                 except Exception as e:
                     print(f"Error: {e}")
                     ws3.append([station.replace("_", " "), 0, 0, 0])
+
+        EXPORT_TASKS[task_id]["progress"] = 70
+
         # =====================================================
         # 🔹 HOURLY REPORT SHEET
         # =====================================================
@@ -2691,6 +3019,8 @@ def api_combined_statistics_export_all():
         ws_hr.append(["MODULE TOTAL"] + mod_total_row)
         ws_hr.append([])
 
+        EXPORT_TASKS[task_id]["progress"] = 80
+
         # =========================
         # ZONE 2 – STATION REPORT
         # =========================
@@ -2770,6 +3100,8 @@ def api_combined_statistics_export_all():
                 ws_hr.append(["TOTAL"] + total_row)
                 ws_hr.append([])
 
+        EXPORT_TASKS[task_id]["progress"] = 90
+
         # =========================
         # ZONE 3 – STATION REPORT
         # =========================
@@ -2803,23 +3135,462 @@ def api_combined_statistics_export_all():
                 ws_hr.append([])
 
         # Save file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        wb.save(temp_file.name)
-        temp_file.close()
+        tmpdir = tempfile.gettempdir()
+        filepath = os.path.join(tmpdir, f"all_zones_stats_{task_id}.xlsx")
+        wb.save(filepath)
 
-        current_datetime = datetime.now().strftime("%d%m%Y_%H%M%S")
-        return send_file(
-            temp_file.name,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            as_attachment=True,
-            download_name=f"all_zones_statistics_{current_datetime}.xlsx"
-        )
+        EXPORT_TASKS[task_id]["progress"] = 100
+        EXPORT_TASKS[task_id]["file"] = filepath
+        EXPORT_TASKS[task_id]["done"] = True
 
     except Exception as e:
-        print("❌ Error exporting all statistics:", e)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        EXPORT_TASKS[task_id]["error"] = str(e)
+        EXPORT_TASKS[task_id]["done"] = True
+        EXPORT_TASKS[task_id]["progress"] = 100
+
+
+@app.route("/api/combined_statistics/export_all/status")
+def api_combined_statistics_export_all_status():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify({"progress": t["progress"], "done": t["done"], "error": t["error"]})
+
+
+@app.route("/api/combined_statistics/export_all/download")
+def api_combined_statistics_export_all_download():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t or not t.get("file") or not os.path.exists(t["file"]):
+        return jsonify({"error": "File not ready or not found"}), 404
+    current_datetime = datetime.now().strftime("%d%m%Y_%H%M%S")
+    return send_file(
+        t["file"],
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"all_zones_statistics_{current_datetime}.xlsx"
+    )
+
+    #     # Zone 1 Data
+    #     with engine.connect() as conn:
+    #         cell_query = text("""
+    #             SELECT 
+    #                 COUNT(*) AS total_cells,
+    #                 SUM(CASE WHEN Cell_Final_Status = 1 THEN 1 ELSE 0 END) AS ok_cells,
+    #                 SUM(CASE WHEN Cell_Final_Status = 0 THEN 1 ELSE 0 END) AS ng_cells
+    #             FROM [ZONE01_REPORTS].[dbo].[Cell_Report]
+    #             WHERE Date_Time BETWEEN :start AND :end
+    #         """)
+    #         cell_stats = conn.execute(cell_query, params).mappings().first() or {}
+
+    #         module_query = text("""
+    #             SELECT 
+    #                 COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
+    #                 SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
+    #                 SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
+    #                 SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
+    #             FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
+    #             WHERE Date_Time BETWEEN :start AND :end
+    #         """)
+    #         module_stats = conn.execute(module_query, params).mappings().first() or {}
+
+    #     ws1 = wb.create_sheet("Zone 1")
+    #     ws1.append(["Zone 1 Combined Statistics"])
+    #     ws1.append(["Date Range", f"{start} to {end}"])
+    #     ws1.append([])
+    #     ws1.append(["Cell Statistics"])
+    #     ws1.append(["Metric", "Count"])
+    #     ws1.append(["Total Cells", cell_stats.get("total_cells", 0)])
+    #     ws1.append(["OK Cells", cell_stats.get("ok_cells", 0)])
+    #     ws1.append(["NG Cells", cell_stats.get("ng_cells", 0)])
+    #     ws1.append([])
+    #     ws1.append(["Module Statistics"])
+    #     ws1.append(["Metric", "Count"])
+    #     ws1.append(["Total Modules", module_stats.get("total_modules", 0)])
+    #     ws1.append(["OK Modules", module_stats.get("ok_modules", 0)])
+    #     ws1.append(["NG Modules", module_stats.get("ng_modules", 0)])
+    #     ws1.append(["In Progress Modules", module_stats.get("inprogress_modules", 0)])
+
+    #     # Zone 2 Data
+    #     stations_z2 = [
+    #         "ACIR_Testing_Station", "Laser_Welding_Station",
+    #         "Negative_Temp_Check_Station", "Polarity_Check_Station", "Routing_Station01",
+    #         "Routing_Station02", "Routing_Station03", "Top_Cell_Holder_Place_Station",
+    #         "Visual_Inspection_Station", "Welding_Fixture_Loading_Station", "Wire_Harness_Fixing_Station",  "Soldering_Station",
+    #             "PlasmaCleaning_Stn",
+    #             "UltrasonicFusion_Stn"
+    #     ]
+
+    #     ws2 = wb.create_sheet("Zone 2")
+    #     ws2.append(["Zone 2 Station Statistics"])
+    #     ws2.append(["Date Range", f"{start} to {end}"])
+    #     ws2.append([])
+    #     ws2.append(["Station Name", "Total Modules", "OK Modules", "NG Modules", "Avg Cycle Time"])
+
+    #     with engine_zone02.connect() as conn:
+    #         for station in stations_z2:
+    #             try:
+    #                 # Special handling for certain stations
+    #                 if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+    #                     query = text(f"""
+    #                                                SELECT
+    #                                                    COUNT(ModuleBarcodeData) as total,
+    #                                                    SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+    #                                                    SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+    #                                                    AVG(avg_cycle_time_per_module) AS avg_cycle_time
+    #                                                FROM (
+    #                                                    SELECT ModuleBarcodeData,
+    #                                                           MIN(Status01) as min_status,
+    #                                                           MAX(Status01) as max_status,
+    #                                                            AVG(
+    #                                                                CASE 
+    #                                                                    WHEN CycleTime BETWEEN 60 AND 360 
+    #                                                                    THEN CycleTime 
+    #                                                                    ELSE NULL 
+    #                                                                END
+    #                                                            ) AS avg_cycle_time_per_module
+    #                                                    FROM [{station}]
+    #                                                    WHERE [DateTime] BETWEEN :start AND :end
+    #                                                    GROUP BY ModuleBarcodeData
+    #                                                ) grouped
+    #                                            """)
+    #                 elif station == "Laser_Welding_Station":
+    #                     query = text(f"""
+    #                                                SELECT 
+    #                                                    COUNT(DISTINCT ModuleBarcodeData) as total,
+    #                                                    SUM(CASE WHEN min_status = 1 THEN 1 ELSE 0 END) as total_ok,
+    #                                                    SUM(CASE WHEN min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+    #                                                     AVG(avg_cycle_time_per_module) AS avg_cycle_time
+    #                                                FROM (
+    #                                                    SELECT ModuleBarcodeData,
+    #                                                           MIN(WeldStatus) as min_status,
+    #                                                            AVG(
+    #                                                                CASE 
+    #                                                                    WHEN CycleTime BETWEEN 60 AND 360 
+    #                                                                    THEN CycleTime 
+    #                                                                    ELSE NULL 
+    #                                                                END
+    #                                                            ) AS avg_cycle_time_per_module
+    #                                                    FROM [{station}]
+    #                                                    WHERE [DateTime] BETWEEN :start AND :end
+    #                                                    GROUP BY ModuleBarcodeData
+    #                                                ) grouped
+    #                                            """)
+    #                 else:
+    #                     query = text(f"""
+    #                                                SELECT 
+    #                                                    COUNT(*) as total,
+    #                                                    SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+    #                                                    SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+    #                                                   AVG(
+    #                                                        CASE 
+    #                                                            WHEN CycleTime BETWEEN 60 AND 360 
+    #                                                            THEN CycleTime 
+    #                                                            ELSE NULL 
+    #                                                        END
+    #                                                    ) AS avg_cycle_time
+    #                                                FROM [{station}]
+    #                                                WHERE [DateTime] BETWEEN :start AND :end
+    #                                            """)
+
+
+    #                 row = conn.execute(query, params).mappings().first() or {}
+    #                 result = dict(row) if row else {}
+
+    #                 # Safe defaults
+    #                 total_ok = result.get("total_ok", 0) or 0
+    #                 total_ng = result.get("total_ng", 0) or 0
+    #                 avg_cycle_time = result.get("avg_cycle_time", 0) or 0
+    #                 total = result.get("total", 0) or 0
+    #                 ws2.append([
+    #                     station.replace("_", " "),
+    #                     total,
+    #                     total_ok,
+    #                     total_ng,
+    #                     avg_cycle_time
+    #                 ])
+    #             except Exception as e:
+    #                 print(f"Error: {e}")
+    #                 ws2.append([station.replace("_", " "), 0, 0, 0])
+
+    #     # Zone 3 Data
+    #     stations_z3 = [
+
+    #         "BatteryPackInsertion",
+    #         "BMS_Conn_Stn",
+    #         "BotmPlate_Tight_Stn",
+    #         "EOL_Testing_Station",
+    #         "Housing_Ins_Stn",
+    #         "HRD_Test_Stn",
+    #         "Laser_Mark_Stn",
+    #         "Leak_Test_Stn",
+    #         "PCM_Filling_Station",
+    #         "PDI_Station",
+    #         "Top_Cover_Close_Stn",
+    #         "TopCover_Attach_Stn",
+    #         "Weighing_Station",
+    #         "RoutinGlueingSt"
+
+    #     ]
+
+    #     ws3 = wb.create_sheet("Zone 3")
+    #     ws3.append(["Zone 3 Station Statistics"])
+    #     ws3.append(["Date Range", f"{start} to {end}"])
+    #     ws3.append([])
+    #     ws3.append(["Station Name", "Total Modules", "OK Modules", "NG Modules", "Avg Cycle Time"])
+
+    #     with engine_zone03.connect() as conn:
+    #         for station in stations_z3:
+    #             try:
+    #                 query = text(f"""
+    #                                           SELECT 
+    #                                               COUNT(*) as total,
+    #                                               SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+    #                                               SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+    #                                               AVG(
+    #                                                   CASE 
+    #                                                       WHEN CycleTime BETWEEN 60 AND 360 
+    #                                                       THEN CycleTime 
+    #                                                       ELSE NULL 
+    #                                                   END
+    #                                               ) AS avg_cycle_time
+    #                                           FROM [ZONE03_REPORTS].[dbo].[{station}]
+    #                                           WHERE [DateTime] BETWEEN :start AND :end
+    #                                       """)
+
+    #                 row = conn.execute(query, params).mappings().first() or {}
+    #                 result = dict(row) if row else {}
+
+    #                 # Safe defaults
+    #                 total_ok = result.get("total_ok", 0) or 0
+    #                 total_ng = result.get("total_ng", 0) or 0
+    #                 avg_cycle_time = result.get("avg_cycle_time", 0) or 0
+    #                 total = result.get("total", 0) or 0
+    #                 ws3.append([
+    #                     station.replace("_", " "),
+    #                     total,
+    #                     total_ok,
+    #                     total_ng,
+    #                     avg_cycle_time
+    #                 ])
+    #             except Exception as e:
+    #                 print(f"Error: {e}")
+    #                 ws3.append([station.replace("_", " "), 0, 0, 0])
+    #     # =====================================================
+    #     # 🔹 HOURLY REPORT SHEET
+    #     # =====================================================
+    #     ws_hr = wb.create_sheet("Hourly Report")
+
+    #     hours_header = [""] + list(range(24))
+
+    #     def empty_hour_row():
+    #         return [0] * 24
+
+    #     def normalize(hourly_rows):
+    #         data = {int(r["hour"]): int(r["cnt"]) for r in hourly_rows}
+    #         return [data.get(h, 0) for h in range(24)]
+
+    #     # =========================
+    #     # ZONE 1 – CELL REPORT
+    #     # =========================
+    #     ws_hr.append(["ZONE 1"])
+    #     ws_hr.append(hours_header)
+
+    #     with engine.connect() as conn:
+    #         ok = conn.execute(text("""
+    #             SELECT DATEPART(HOUR, Date_Time) AS hour, COUNT(*) cnt
+    #             FROM ZONE01_REPORTS.dbo.Cell_Report
+    #             WHERE Cell_Final_Status = 1
+    #               AND Date_Time BETWEEN :start AND :end
+    #             GROUP BY DATEPART(HOUR, Date_Time)
+    #         """), hour_params).mappings().all()
+
+    #         ng = conn.execute(text("""
+    #             SELECT DATEPART(HOUR, Date_Time) AS hour, COUNT(*) cnt
+    #             FROM ZONE01_REPORTS.dbo.Cell_Report
+    #             WHERE Cell_Final_Status = 0
+    #               AND Date_Time BETWEEN :start AND :end
+    #             GROUP BY DATEPART(HOUR, Date_Time)
+    #         """), hour_params).mappings().all()
+    #         mod_ok = conn.execute(text("""
+    #                SELECT DATEPART(HOUR, Date_Time) hour,
+    #                       COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+    #                FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+    #                WHERE StoredStatus = 1
+    #                  AND Date_Time BETWEEN :start AND :end
+    #                GROUP BY DATEPART(HOUR, Date_Time)
+    #            """), hour_params).mappings().all()
+
+    #         mod_ng = conn.execute(text("""
+    #                SELECT DATEPART(HOUR, Date_Time) hour,
+    #                       COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+    #                FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+    #                WHERE StoredStatus = 2
+    #                  AND Date_Time BETWEEN :start AND :end
+    #                GROUP BY DATEPART(HOUR, Date_Time)
+    #            """), hour_params).mappings().all()
+
+    #         mod_inprogress = conn.execute(text("""
+    #                SELECT DATEPART(HOUR, Date_Time) hour,
+    #                       COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+    #                FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+    #                WHERE StoredStatus = 0
+    #                  AND Date_Time BETWEEN :start AND :end
+    #                GROUP BY DATEPART(HOUR, Date_Time)
+    #            """), hour_params).mappings().all()
+
+    #     ok_row = normalize(ok)
+    #     ng_row = normalize(ng)
+    #     total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+    #     mod_ok_row = normalize(mod_ok)
+    #     mod_ng_row = normalize(mod_ng)
+    #     mod_ip_row = normalize(mod_inprogress)
+    #     mod_total_row = [
+    #         mod_ok_row[i] + mod_ng_row[i] + mod_ip_row[i]
+    #         for i in range(24)
+    #     ]
+
+    #     ws_hr.append(["Cell OK"] + ok_row)
+    #     ws_hr.append(["Cell NG"] + ng_row)
+    #     ws_hr.append(["Cell TOTAL"] + total_row)
+    #     ws_hr.append([])
+
+    #     ws_hr.append(["MODULE OK"] + mod_ok_row)
+    #     ws_hr.append(["MODULE NG"] + mod_ng_row)
+    #     ws_hr.append(["MODULE INPROGRESS"] + mod_ip_row)
+    #     ws_hr.append(["MODULE TOTAL"] + mod_total_row)
+    #     ws_hr.append([])
+
+    #     # =========================
+    #     # ZONE 2 – STATION REPORT
+    #     # =========================
+    #     with engine_zone02.connect() as conn:
+    #         for station in stations_z2:
+    #             ws_hr.append([f"ZONE 2 - {station}"])
+    #             ws_hr.append(hours_header)
+
+    #             if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+    #                 ok_sql = f"""
+    #                     SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                     FROM {station}
+    #                     WHERE Status01 = 1 AND DateTime BETWEEN :start AND :end
+    #                     GROUP BY DATEPART(HOUR, DateTime)
+    #                 """
+    #                 ng_sql = f"""
+    #                     SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                     FROM {station}
+    #                     WHERE Status01 = 2 AND DateTime BETWEEN :start AND :end
+    #                     GROUP BY DATEPART(HOUR, DateTime)
+    #                 """
+    #             elif station == "Laser_Welding_Station":
+    #                 ok_sql = """
+    #                        WITH PerModule AS (
+    #                            SELECT
+    #                                ModuleBarcodeData,
+    #                                DATEPART(HOUR, MIN(DateTime)) AS hour,
+    #                                MIN(WeldStatus) AS final_status
+    #                            FROM Laser_Welding_Station
+    #                            WHERE DateTime BETWEEN :start AND :end
+    #                            GROUP BY ModuleBarcodeData
+    #                        )
+    #                        SELECT hour, COUNT(*) cnt
+    #                        FROM PerModule
+    #                        WHERE final_status = 1
+    #                        GROUP BY hour
+    #                    """
+
+    #                 ng_sql = """
+    #                        WITH PerModule AS (
+    #                            SELECT
+    #                                ModuleBarcodeData,
+    #                                DATEPART(HOUR, MIN(DateTime)) AS hour,
+    #                                MIN(WeldStatus) AS final_status
+    #                            FROM Laser_Welding_Station
+    #                            WHERE DateTime BETWEEN :start AND :end
+    #                            GROUP BY ModuleBarcodeData
+    #                        )
+    #                        SELECT hour, COUNT(*) cnt
+    #                        FROM PerModule
+    #                        WHERE final_status = 2
+    #                        GROUP BY hour
+    #                    """
+    #             else:
+    #                 ok_sql = f"""
+    #                     SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                     FROM {station}
+    #                     WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+    #                     GROUP BY DATEPART(HOUR, DateTime)
+    #                 """
+    #                 ng_sql = f"""
+    #                     SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                     FROM {station}
+    #                     WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+    #                     GROUP BY DATEPART(HOUR, DateTime)
+    #                 """
+
+    #             ok = conn.execute(text(ok_sql), hour_params).mappings().all()
+    #             ng = conn.execute(text(ng_sql), hour_params).mappings().all()
+
+    #             ok_row = normalize(ok)
+    #             ng_row = normalize(ng)
+    #             total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+    #             ws_hr.append(["OK"] + ok_row)
+    #             ws_hr.append(["NG"] + ng_row)
+    #             ws_hr.append(["TOTAL"] + total_row)
+    #             ws_hr.append([])
+
+    #     # =========================
+    #     # ZONE 3 – STATION REPORT
+    #     # =========================
+
+    #     with engine_zone03.connect() as conn:
+    #         for station in stations_z3:
+    #             ws_hr.append([f"ZONE 3 - {station}"])
+    #             ws_hr.append(hours_header)
+
+    #             ok = conn.execute(text(f"""
+    #                 SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                 FROM {station}
+    #                 WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+    #                 GROUP BY DATEPART(HOUR, DateTime)
+    #             """), hour_params).mappings().all()
+
+    #             ng = conn.execute(text(f"""
+    #                 SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+    #                 FROM {station}
+    #                 WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+    #                 GROUP BY DATEPART(HOUR, DateTime)
+    #             """), hour_params).mappings().all()
+
+    #             ok_row = normalize(ok)
+    #             ng_row = normalize(ng)
+    #             total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+    #             ws_hr.append(["OK"] + ok_row)
+    #             ws_hr.append(["NG"] + ng_row)
+    #             ws_hr.append(["TOTAL"] + total_row)
+    #             ws_hr.append([])
+
+    #     # Save file
+    #     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    #     wb.save(temp_file.name)
+    #     temp_file.close()
+
+    #     current_datetime = datetime.now().strftime("%d%m%Y_%H%M%S")
+    #     return send_file(
+    #         temp_file.name,
+    #         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    #         as_attachment=True,
+    #         download_name=f"all_zones_statistics_{current_datetime}.xlsx"
+    #     )
+
+    # except Exception as e:
+    #     print("❌ Error exporting all statistics:", e)
+    #     import traceback
+    #     traceback.print_exc()
+    #     return jsonify({"error": str(e)}), 500
 
 
 
@@ -3213,11 +3984,23 @@ def fetch_allinone_data():
 # === Export full filtered data to Excel ===
 @app.route("/export_excel_allinone", methods=["POST"])
 def export_excel_allinone():
+    """Start background export for all-in-one data. Returns a task_id to poll."""
+    args = request.get_json(force=True) or {}
+    task_id = uuid4().hex
+    EXPORT_TASKS[task_id] = {"progress": 0, "file": None, "done": False, "error": None}
+    t = Thread(target=export_excel_allinone_worker, args=(task_id, args), daemon=True)
+    t.start()
+    return jsonify({"task_id": task_id})
+
+
+def export_excel_allinone_worker(task_id, args):
+    """Background worker for all-in-one Excel export"""
     try:
-        body = request.get_json(force=True) or {}
-        barcode = body.get("barcode")
-        start_date = parse_date(body.get("start_date"))
-        end_date = parse_date(body.get("end_date"))
+        barcode = args.get("barcode")
+        start_date = parse_date(args.get("start_date"))
+        end_date = parse_date(args.get("end_date"))
+
+        EXPORT_TASKS[task_id]["progress"] = 5
 
         # ======================================================
         # 1️⃣ LINKAGE (ZONE03) – DRIVER
@@ -3251,7 +4034,11 @@ def export_excel_allinone():
             linkage_df = pd.read_sql(linkage_sql, conn, params=params)
 
         if linkage_df.empty:
-            return jsonify({"error": "No linkage data found"}), 404
+            EXPORT_TASKS[task_id]["error"] = "No linkage data found"
+            EXPORT_TASKS[task_id]["done"] = True
+            return
+
+        EXPORT_TASKS[task_id]["progress"] = 10
 
         # ======================================================
         # 2️⃣ BUILD BARCODE SET
@@ -3265,6 +4052,8 @@ def export_excel_allinone():
             .tolist()
         )
         all_barcodes = list({b for b in all_barcodes if b})
+
+        EXPORT_TASKS[task_id]["progress"] = 15
 
         # ======================================================
         # 3️⃣ MODULE (ZONE01) – LATEST PER BARCODE
@@ -3309,6 +4098,9 @@ def export_excel_allinone():
             module_df = pd.read_sql(module_sql, conn)
 
         module_map = module_df.set_index("Barcode").to_dict("index")
+
+        EXPORT_TASKS[task_id]["progress"] = 25
+
         # ======================================================
         # 4️⃣ ACIR (ZONE02) – LATEST
         # ======================================================
@@ -3326,6 +4118,8 @@ def export_excel_allinone():
             acir_df = pd.read_sql(acir_sql, conn)
 
         acir_map = acir_df.set_index("ModuleBarcodeData").to_dict("index")
+
+        EXPORT_TASKS[task_id]["progress"] = 40
 
         # ======================================================
         # 5️⃣ LEAK + WEIGHT (ZONE03)
@@ -3352,6 +4146,8 @@ def export_excel_allinone():
 
         leak_map = leak_df.set_index("FGBarcodeData").to_dict("index")
         weight_map = weight_df.set_index("FGBarcode_Data").to_dict("index")
+
+        EXPORT_TASKS[task_id]["progress"] = 60
 
         # ======================================================
         # 6️⃣ FINAL MERGE (FAST HASH LOOKUP)
@@ -3381,6 +4177,8 @@ def export_excel_allinone():
 
         final_df = pd.DataFrame(final_rows).fillna("Not Found")
 
+        EXPORT_TASKS[task_id]["progress"] = 80
+
         # ======================================================
         # 7️⃣ EXPORT
         # ======================================================
@@ -3389,11 +4187,32 @@ def export_excel_allinone():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         final_df.to_excel(path, index=False)
 
-        return send_file(path, as_attachment=True)
+        EXPORT_TASKS[task_id]["progress"] = 100
+        EXPORT_TASKS[task_id]["file"] = path
+        EXPORT_TASKS[task_id]["done"] = True
 
     except Exception as e:
-        print("❌ EXPORT ERROR:", e)
-        return jsonify({"error": str(e)}), 500
+        EXPORT_TASKS[task_id]["error"] = str(e)
+        EXPORT_TASKS[task_id]["done"] = True
+        EXPORT_TASKS[task_id]["progress"] = 100
+
+
+@app.route("/export_excel_allinone/status")
+def export_excel_allinone_status():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify({"progress": t["progress"], "done": t["done"], "error": t["error"]})
+
+
+@app.route("/export_excel_allinone/download")
+def export_excel_allinone_download():
+    task_id = request.args.get("task_id")
+    t = EXPORT_TASKS.get(task_id)
+    if not t or not t.get("file") or not os.path.exists(t["file"]):
+        return jsonify({"error": "File not ready or not found"}), 404
+    return send_file(t["file"], as_attachment=True)
 
 # -----------------------
 # Run (use Gunicorn/Nginx in prod)
