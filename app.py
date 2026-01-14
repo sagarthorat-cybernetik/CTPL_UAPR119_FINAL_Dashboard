@@ -4066,126 +4066,209 @@ def export_excel_allinone_worker(task_id, args):
         EXPORT_TASKS[task_id]["progress"] = 15
 
         # ======================================================
-        # 3️⃣ MODULE (ZONE01) – LATEST PER BARCODE
+        # 3️⃣ MODULE (ZONE01) – FILTERED BY BARCODES
         # ======================================================
-        module_sql = """
-        ;WITH LatestCell AS (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY Cell_Barcode ORDER BY Date_Time DESC
-            ) rn
-            FROM Cell_Report
-        )
-        SELECT
-            M.Pallet_Identification_Barcode AS Barcode,
-            MAX(M.Date_Time) AS Module_DateTime,
-            MAX(M.Shift) AS Module_Shift,
-            MAX(M.Operator) AS Module_Operator,
-            MAX(M.Module_Type) AS ModuleType,
-            ROUND(MAX(L.Cell_Capacity_Actual) - MIN(L.Cell_Capacity_Actual), 4) AS CapacityDiff,
-            ROUND(MAX(L.Cell_Voltage_Actual) - MIN(L.Cell_Voltage_Actual), 4) AS VoltageDiff,
-            ROUND(MAX(L.Cell_Resistance_Actual) - MIN(L.Cell_Resistance_Actual), 4) AS ResistanceDiff
-        FROM Module_Formation_Report M
-        JOIN LatestCell L
-            ON L.Cell_Barcode IN (
-                M.Barcode01, M.Barcode02, M.Barcode03, M.Barcode04,
-                M.Barcode05, M.Barcode06, M.Barcode07, M.Barcode08,
-                M.Barcode09, M.Barcode10, M.Barcode11, M.Barcode12,
-                M.Barcode13, M.Barcode14, M.Barcode15, M.Barcode16,
-                M.Barcode17, M.Barcode18, M.Barcode19, M.Barcode20,
-                M.Barcode21, M.Barcode22, M.Barcode23, M.Barcode24,
-                M.Barcode25, M.Barcode26, M.Barcode27, M.Barcode28,
-                M.Barcode29, M.Barcode30, M.Barcode31, M.Barcode32,
-                M.Barcode33, M.Barcode34, M.Barcode35, M.Barcode36,
-                M.Barcode37, M.Barcode38, M.Barcode39, M.Barcode40,
-                M.Barcode41, M.Barcode42, M.Barcode43, M.Barcode44,
-                M.Barcode45, M.Barcode46, M.Barcode47, M.Barcode48
+        if all_barcodes:
+            # Create parameterized query for barcodes
+            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
+            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
+
+            module_sql = f"""
+            ;WITH LatestCell AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY Cell_Barcode ORDER BY Date_Time DESC
+                ) rn
+                FROM Cell_Report
             )
-        WHERE L.rn = 1
-        GROUP BY M.Pallet_Identification_Barcode
-        """
+            SELECT
+                M.Pallet_Identification_Barcode AS Barcode,
+                MAX(M.Date_Time) AS Module_DateTime,
+                MAX(M.Shift) AS Module_Shift,
+                MAX(M.Operator) AS Module_Operator,
+                MAX(M.Module_Type) AS ModuleType,
+                ROUND(MAX(L.Cell_Capacity_Actual) - MIN(L.Cell_Capacity_Actual), 4) AS CapacityDiff,
+                ROUND(MAX(L.Cell_Voltage_Actual) - MIN(L.Cell_Voltage_Actual), 4) AS VoltageDiff,
+                ROUND(MAX(L.Cell_Resistance_Actual) - MIN(L.Cell_Resistance_Actual), 4) AS ResistanceDiff
+            FROM Module_Formation_Report M
+            JOIN LatestCell L
+                ON L.Cell_Barcode IN (
+                    M.Barcode01, M.Barcode02, M.Barcode03, M.Barcode04,
+                    M.Barcode05, M.Barcode06, M.Barcode07, M.Barcode08,
+                    M.Barcode09, M.Barcode10, M.Barcode11, M.Barcode12,
+                    M.Barcode13, M.Barcode14, M.Barcode15, M.Barcode16,
+                    M.Barcode17, M.Barcode18, M.Barcode19, M.Barcode20,
+                    M.Barcode21, M.Barcode22, M.Barcode23, M.Barcode24,
+                    M.Barcode25, M.Barcode26, M.Barcode27, M.Barcode28,
+                    M.Barcode29, M.Barcode30, M.Barcode31, M.Barcode32,
+                    M.Barcode33, M.Barcode34, M.Barcode35, M.Barcode36,
+                    M.Barcode37, M.Barcode38, M.Barcode39, M.Barcode40,
+                    M.Barcode41, M.Barcode42, M.Barcode43, M.Barcode44,
+                    M.Barcode45, M.Barcode46, M.Barcode47, M.Barcode48
+                )
+            WHERE L.rn = 1 AND M.Pallet_Identification_Barcode IN ({barcode_placeholders})
+            GROUP BY M.Pallet_Identification_Barcode
+            """
 
-        with engine.connect() as conn:
-            module_df = pd.read_sql(module_sql, conn)
+            with engine.connect() as conn:
+                module_df = pd.read_sql(text(module_sql), conn, barcode_params)
+        else:
+            module_df = pd.DataFrame()
 
-        module_map = module_df.set_index("Barcode").to_dict("index")
+        module_map = module_df.set_index("Barcode").to_dict("index") if not module_df.empty else {}
 
         EXPORT_TASKS[task_id]["progress"] = 25
 
         # ======================================================
-        # 4️⃣ ACIR (ZONE02) – LATEST
+        # 4️⃣ ACIR (ZONE02) – FILTERED BY BARCODES
         # ======================================================
-        acir_sql = """
-        SELECT *
-        FROM (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY ModuleBarcodeData ORDER BY DateTime DESC
-            ) rn
-            FROM ACIR_Testing_Station
-        ) t WHERE rn = 1
-        """
+        if all_barcodes:
+            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
+            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
 
-        with engine_zone02.connect() as conn:
-            acir_df = pd.read_sql(acir_sql, conn)
+            acir_sql = f"""
+            SELECT *
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY ModuleBarcodeData ORDER BY DateTime DESC
+                ) rn
+                FROM ACIR_Testing_Station
+                WHERE ModuleBarcodeData IN ({barcode_placeholders})
+            ) t WHERE rn = 1
+            """
 
-        acir_map = acir_df.set_index("ModuleBarcodeData").to_dict("index")
+            with engine_zone02.connect() as conn:
+                acir_df = pd.read_sql(text(acir_sql), conn, barcode_params)
+        else:
+            acir_df = pd.DataFrame()
+
+        acir_map = acir_df.set_index("ModuleBarcodeData").to_dict("index") if not acir_df.empty else {}
 
         EXPORT_TASKS[task_id]["progress"] = 40
 
         # ======================================================
-        # 5️⃣ LEAK + WEIGHT (ZONE03)
+        # 5️⃣ LEAK + WEIGHT (ZONE03) – FILTERED BY BARCODES
         # ======================================================
-        leak_df = pd.read_sql("""
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY FGBarcodeData ORDER BY DateTime DESC
-                ) rn
-                FROM Leak_Test_Stn
-            ) t WHERE rn = 1
-        """, engine_zone03)
+        if all_barcodes:
+            barcode_placeholders = ','.join([f':bc{i}' for i in range(len(all_barcodes))])
+            barcode_params = {f'bc{i}': bc for i, bc in enumerate(all_barcodes)}
 
-        weight_df = pd.read_sql("""
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY FGBarcode_Data ORDER BY DateTime DESC
-                ) rn
-                FROM Weighing_Station
-            ) t WHERE rn = 1
-        """, engine_zone03)
+            leak_sql = f"""
+                SELECT *
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY FGBarcodeData ORDER BY DateTime DESC
+                    ) rn
+                    FROM Leak_Test_Stn
+                    WHERE FGBarcodeData IN ({barcode_placeholders})
+                ) t WHERE rn = 1
+            """
 
-        leak_map = leak_df.set_index("FGBarcodeData").to_dict("index")
-        weight_map = weight_df.set_index("FGBarcode_Data").to_dict("index")
+            weight_sql = f"""
+                SELECT *
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY FGBarcode_Data ORDER BY DateTime DESC
+                    ) rn
+                    FROM Weighing_Station
+                    WHERE FGBarcode_Data IN ({barcode_placeholders})
+                ) t WHERE rn = 1
+            """
+
+            leak_df = pd.read_sql(text(leak_sql), engine_zone03, barcode_params)
+            weight_df = pd.read_sql(text(weight_sql), engine_zone03, barcode_params)
+        else:
+            leak_df = pd.DataFrame()
+            weight_df = pd.DataFrame()
+
+        leak_map = leak_df.set_index("FGBarcodeData").to_dict("index") if not leak_df.empty else {}
+        weight_map = weight_df.set_index("FGBarcode_Data").to_dict("index") if not weight_df.empty else {}
 
         EXPORT_TASKS[task_id]["progress"] = 60
 
         # ======================================================
-        # 6️⃣ FINAL MERGE (FAST HASH LOOKUP)
+        # 6️⃣ FINAL MERGE WITH ALL COLUMNS PRESERVED
         # ======================================================
+
+        # Define all possible columns that should be in the final output
+        all_columns = [
+            # Linkage columns
+            'DateTime', 'Shift', 'Operator', 'FGNumber', 'SFGNumber', 'Module01_ID', 'Module02_ID',
+            # Module columns
+            'Module_DateTime', 'Module_Shift', 'Module_Operator', 'ModuleType',
+            'CapacityDiff', 'VoltageDiff', 'ResistanceDiff',
+            # ACIR columns (add all ACIR columns dynamically)
+        ]
+
+        # Add ACIR columns if available
+        if acir_df is not None and not acir_df.empty:
+            acir_columns = [col for col in acir_df.columns if col not in ['ModuleBarcodeData', 'rn']]
+            all_columns.extend(acir_columns)
+
+        # Add leak and weight columns
+        all_columns.extend(['LeakRate', 'Weight'])
+
         final_rows = []
 
         for _, r in linkage_df.iterrows():
-            row = r.to_dict()
-            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
-                if bc in module_map:
-                    row.update(module_map[bc])
+            # Start with linkage data
+            row = {col: r.get(col, "Not Found") for col in linkage_df.columns}
+
+            # Initialize all other columns with "Not Found"
+            for col in all_columns:
+                if col not in row:
+                    row[col] = "Not Found"
+
+            # Try to find module data
+            module_found = False
+            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+                if bc and bc in module_map:
+                    module_data = module_map[bc]
+                    row.update({
+                        'Module_DateTime': module_data.get('Module_DateTime', "Not Found"),
+                        'Module_Shift': module_data.get('Module_Shift', "Not Found"),
+                        'Module_Operator': module_data.get('Module_Operator', "Not Found"),
+                        'ModuleType': module_data.get('ModuleType', "Not Found"),
+                        'CapacityDiff': module_data.get('CapacityDiff', "Not Found"),
+                        'VoltageDiff': module_data.get('VoltageDiff', "Not Found"),
+                        'ResistanceDiff': module_data.get('ResistanceDiff', "Not Found"),
+                    })
+                    module_found = True
                     break
-            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
-                if bc in acir_map:
-                    row.update(acir_map[bc])
+
+            # Try to find ACIR data
+            acir_found = False
+            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+                if bc and bc in acir_map:
+                    acir_data = acir_map[bc]
+                    # Add all ACIR columns except the key
+                    for col in acir_data:
+                        if col not in ['ModuleBarcodeData', 'rn']:
+                            row[col] = acir_data[col]
+                    acir_found = True
                     break
-            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
-                if bc in leak_map:
-                    row["LeakRate"] = round(leak_map[bc]["Leak_Rate"], 4)
+
+            # Try to find leak data
+            leak_found = False
+            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+                if bc and bc in leak_map:
+                    leak_data = leak_map[bc]
+                    row['LeakRate'] = round(leak_data.get('Leak_Rate', 0), 4)
+                    leak_found = True
                     break
-            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
-                if bc in weight_map:
-                    row["Weight"] = round(weight_map[bc]["Actual_Weight"], 4)
+
+            # Try to find weight data
+            weight_found = False
+            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+                if bc and bc in weight_map:
+                    weight_data = weight_map[bc]
+                    row['Weight'] = round(weight_data.get('Actual_Weight', 0), 4)
+                    weight_found = True
                     break
 
             final_rows.append(row)
 
-        final_df = pd.DataFrame(final_rows).fillna("Not Found")
+        # Create DataFrame with all columns in correct order
+        final_df = pd.DataFrame(final_rows, columns=all_columns).fillna("Not Found")
 
         EXPORT_TASKS[task_id]["progress"] = 80
 

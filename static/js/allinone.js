@@ -243,7 +243,7 @@ async function startExport() {
 
     const { task_id } = await startRes.json();
 
-    // Poll for completion
+    // Poll for completion with progress updates
     await pollExportStatus(task_id);
 
   } catch (err) {
@@ -290,7 +290,7 @@ async function pollExportStatus(task_id) {
 
           resolve();
         } else {
-          // Continue polling
+          // Continue polling every 2 seconds
           setTimeout(poll, 2000);
         }
       } catch (err) {
