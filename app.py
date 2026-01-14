@@ -1373,7 +1373,7 @@ def export_excel_zone02_worker(task_id, args):
             params["start"] = start_date
             params["end"] = end_date
         if barcode:
-            filters.append("Barcode = :barcode")
+            filters.append("ModuleBarcodeData = :barcode")
             params["barcode"] = barcode
 
         where_clause = " AND ".join(filters) if filters else "1=1"
@@ -1680,8 +1680,18 @@ def export_excel_zone03():
             filters.append("[DateTime] BETWEEN :start AND :end")
             params["start"] = start_date
             params["end"] = end_date
-        if barcode:
-            filters.append("Barcode = :barcode")
+        if barcode and (station_table == "BMS_Conn_Stn" or station_table == "BotmPlate_Tight_Stn" or station_table == "SFGBarcodeData"):
+            filters.append("SFGBarcodeData = :barcode")
+            params["barcode"] = barcode
+        elif barcode and (station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn"  or station_table == "RoutinGlueingSt"):
+            filters.append("FGBarcodeData = :barcode")
+            params["barcode"] = barcode
+        elif barcode and station_table == "Weighing_Station":
+            filters.append("FGBarcode_Data = :barcode")
+            params["barcode"] = barcode
+
+        elif barcode:
+            filters.append("ModuleBarcodeData = :barcode")
             params["barcode"] = barcode
 
         where_clause = " AND ".join(filters) if filters else "1=1"
