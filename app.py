@@ -4189,45 +4189,57 @@ def export_excel_allinone_worker(task_id, args):
         # 6️⃣ FINAL MERGE WITH ALL COLUMNS PRESERVED
         # ======================================================
 
-        # Define all possible columns that should be in the final output
-        all_columns = [
-            # Linkage columns
-            'DateTime', 'Shift', 'Operator', 'FGNumber', 'SFGNumber', 'Module01_ID', 'Module02_ID',
-            # Module columns
-            'Module_DateTime', 'Module_Shift', 'Module_Operator', 'ModuleType',
-            'CapacityDiff', 'VoltageDiff', 'ResistanceDiff',
-            # ACIR columns (add all ACIR columns dynamically)
+        # Define the exact column order as requested by user
+        final_columns = [
+            'DateTime', 'FGNumber', 'SFGNumber', 'Module01_ID', 'Module02_ID',  # Linkage columns
+            'DateTime', 'Shift', 'Operator', 'ModuleBarcodeData',  # Module data columns
+            'CapacityDiff', 'VoltageDiff', 'ResistanceDiff',  # Calculated module diffs
+            'Pack_Level_Resistance', 'Pack_Level_Voltage',  # ACIR columns
+            'Pack_Level_Resistance_Module02', 'Pack_Level_Voltage_Module02',
+            'String_Level_IR_Diff_Max_Min', 'String_Level_V_Diff_Max_Min',
+            'Module_Level_Resistance', 'LeakRate', 'Weight'  # Leak and weight
         ]
-
-        # Add ACIR columns if available
-        if acir_df is not None and not acir_df.empty:
-            acir_columns = [col for col in acir_df.columns if col not in ['ModuleBarcodeData', 'rn']]
-            all_columns.extend(acir_columns)
-
-        # Add leak and weight columns
-        all_columns.extend(['LeakRate', 'Weight'])
 
         final_rows = []
 
-        for _, r in linkage_df.iterrows():
+        for _, linkage_row in linkage_df.iterrows():
             # Start with linkage data
-            row = {col: r.get(col, "Not Found") for col in linkage_df.columns}
+            row = {}
 
-            # Initialize all other columns with "Not Found"
-            for col in all_columns:
-                if col not in row:
-                    row[col] = "Not Found"
+            # Add linkage columns
+            for col in linkage_df.columns:
+                row[col] = linkage_row.get(col, "Not Found")
 
-            # Try to find module data
+            # Initialize combined data columns with "Not Found"
+            combined_defaults = {
+                'DateTime': "Not Found",  # Second DateTime for module data
+                'Shift': "Not Found",
+                'Operator': "Not Found",
+                'ModuleBarcodeData': "Not Found",
+                'CapacityDiff': "Not Found",
+                'VoltageDiff': "Not Found",
+                'ResistanceDiff': "Not Found",
+                'Pack_Level_Resistance': "Not Found",
+                'Pack_Level_Voltage': "Not Found",
+                'Pack_Level_Resistance_Module02': "Not Found",
+                'Pack_Level_Voltage_Module02': "Not Found",
+                'String_Level_IR_Diff_Max_Min': "Not Found",
+                'String_Level_V_Diff_Max_Min': "Not Found",
+                'Module_Level_Resistance': "Not Found",
+                'LeakRate': "Not Found",
+                'Weight': "Not Found"
+            }
+
+            # Try to find module data for this linkage row
             module_found = False
-            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+            for bc in [linkage_row.get("SFGNumber"), linkage_row.get("Module01_ID"), linkage_row.get("Module02_ID")]:
                 if bc and bc in module_map:
                     module_data = module_map[bc]
-                    row.update({
-                        'Module_DateTime': module_data.get('Module_DateTime', "Not Found"),
-                        'Module_Shift': module_data.get('Module_Shift', "Not Found"),
-                        'Module_Operator': module_data.get('Module_Operator', "Not Found"),
-                        'ModuleType': module_data.get('ModuleType', "Not Found"),
+                    combined_defaults.update({
+                        'DateTime': module_data.get('Module_DateTime', "Not Found"),
+                        'Shift': module_data.get('Module_Shift', "Not Found"),
+                        'Operator': module_data.get('Module_Operator', "Not Found"),
+                        'ModuleBarcodeData': bc,
                         'CapacityDiff': module_data.get('CapacityDiff', "Not Found"),
                         'VoltageDiff': module_data.get('VoltageDiff', "Not Found"),
                         'ResistanceDiff': module_data.get('ResistanceDiff', "Not Found"),
@@ -4235,40 +4247,48 @@ def export_excel_allinone_worker(task_id, args):
                     module_found = True
                     break
 
-            # Try to find ACIR data
+            # Try to find ACIR data for this linkage row
             acir_found = False
-            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+            for bc in [linkage_row.get("SFGNumber"), linkage_row.get("Module01_ID"), linkage_row.get("Module02_ID")]:
                 if bc and bc in acir_map:
                     acir_data = acir_map[bc]
-                    # Add all ACIR columns except the key
-                    for col in acir_data:
-                        if col not in ['ModuleBarcodeData', 'rn']:
-                            row[col] = acir_data[col]
+                    combined_defaults.update({
+                        'Pack_Level_Resistance': round(acir_data.get('Pack_Level_Resistance', 0), 4) if acir_data.get('Pack_Level_Resistance') else "Not Found",
+                        'Pack_Level_Voltage': round(acir_data.get('Pack_Level_Voltage', 0), 4) if acir_data.get('Pack_Level_Voltage') else "Not Found",
+                        'Pack_Level_Resistance_Module02': round(acir_data.get('Pack_Level_Resistance_Module02', 0), 4) if acir_data.get('Pack_Level_Resistance_Module02') else "Not Found",
+                        'Pack_Level_Voltage_Module02': round(acir_data.get('Pack_Level_Voltage_Module02', 0), 4) if acir_data.get('Pack_Level_Voltage_Module02') else "Not Found",
+                        'String_Level_IR_Diff_Max_Min': round(acir_data.get('String_Level_IR_Diff_Max_Min', 0), 4) if acir_data.get('String_Level_IR_Diff_Max_Min') else "Not Found",
+                        'String_Level_V_Diff_Max_Min': round(acir_data.get('String_Level_V_Diff_Max_Min', 0) * 1000, 4) if acir_data.get('String_Level_V_Diff_Max_Min') else "Not Found",
+                        'Module_Level_Resistance': round(acir_data.get('Module_Level_Resistance', 0), 4) if acir_data.get('Module_Level_Resistance') else "Not Found",
+                    })
                     acir_found = True
                     break
 
-            # Try to find leak data
+            # Try to find leak data for this linkage row
             leak_found = False
-            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+            for bc in [linkage_row.get("SFGNumber"), linkage_row.get("Module01_ID"), linkage_row.get("Module02_ID")]:
                 if bc and bc in leak_map:
                     leak_data = leak_map[bc]
-                    row['LeakRate'] = round(leak_data.get('Leak_Rate', 0), 4)
+                    combined_defaults['LeakRate'] = round(leak_data.get('Leak_Rate', 0), 4) if leak_data.get('Leak_Rate') else "Not Found"
                     leak_found = True
                     break
 
-            # Try to find weight data
+            # Try to find weight data for this linkage row
             weight_found = False
-            for bc in [r.get("SFGNumber"), r.get("Module01_ID"), r.get("Module02_ID")]:
+            for bc in [linkage_row.get("SFGNumber"), linkage_row.get("Module01_ID"), linkage_row.get("Module02_ID")]:
                 if bc and bc in weight_map:
                     weight_data = weight_map[bc]
-                    row['Weight'] = round(weight_data.get('Actual_Weight', 0), 4)
+                    combined_defaults['Weight'] = round(weight_data.get('Actual_Weight', 0), 4) if weight_data.get('Actual_Weight') else "Not Found"
                     weight_found = True
                     break
 
+            # Merge combined data into the row
+            row.update(combined_defaults)
+
             final_rows.append(row)
 
-        # Create DataFrame with all columns in correct order
-        final_df = pd.DataFrame(final_rows, columns=all_columns).fillna("Not Found")
+        # Create DataFrame with exact column order
+        final_df = pd.DataFrame(final_rows, columns=final_columns).fillna("Not Found")
 
         EXPORT_TASKS[task_id]["progress"] = 80
 
