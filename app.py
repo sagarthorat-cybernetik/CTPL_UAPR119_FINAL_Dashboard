@@ -1205,7 +1205,7 @@ def fetch_data_zone02():
             total = conn.execute(count_query, params).scalar()
 
             if station_table == "Tracebility_Table" or station_table == "Cell_Depth_Report":
-                print("non status table")
+                # print("non status table")
                 total_ok = "NA"
                 total_ng = "NA"
                 avg_cycle_time = "NA"
@@ -1513,15 +1513,23 @@ def fetch_data_zone03():
         if barcode and (station_table == "BMS_Conn_Stn" or station_table == "BotmPlate_Tight_Stn" or station_table == "SFGBarcodeData"):
             filters.append("SFGBarcodeData = :barcode")
             params["barcode"] = barcode
-        elif barcode and (station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn" or station_table == "Weighing_Station" or station_table == "RoutinGlueingSt"):
+        elif barcode and (station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn"  or station_table == "RoutinGlueingSt"):
             filters.append("FGBarcodeData = :barcode")
             params["barcode"] = barcode
+        elif barcode and station_table == "Weighing_Station":
+            filters.append("FGBarcode_Data = :barcode")
+            params["barcode"] = barcode
+
         elif barcode:
             filters.append("ModuleBarcodeData = :barcode")
             params["barcode"] = barcode
-        if shift:
+        if shift and station_table == "Weighing_Station":
+            filters.append("Oprational_Shift = :shift")
+            params["shift"] = shift
+        elif shift:
             filters.append("OperationalShift = :shift")
             params["shift"] = shift
+
         where_clause = " AND ".join(filters) if filters else "1=1"
         # Paginated data query
         query = text(f"""
@@ -1835,7 +1843,7 @@ def api_combined_statistics():
             return jsonify({"error": "start_date and end_date are required"}), 400
 
         params = {"start": start_dt, "end": end_dt}
-        print(zone)
+        # print(zone)
         if zone == "zone1":
             # Zone 1: Cell and Module statistics
             with engine.connect() as conn:
@@ -1991,7 +1999,7 @@ def api_combined_statistics():
                             "ng": 0,
                             "avgcytime" : 0,
                         })
-            print(station_stats)
+            # print(station_stats)
             return jsonify({
                 "zone": "zone2",
                 "stations": station_stats
@@ -2089,7 +2097,10 @@ def api_combined_statistics_export():
 
         if not start_dt or not end_dt:
             return jsonify({"error": "start_date and end_date are required"}), 400
-
+        # 🔹 Hourly report only for start day
+        hour_start = start_dt.replace(hour=0, minute=0, second=0)
+        hour_end = start_dt.replace(hour=23, minute=59, second=59)
+        hour_params = {"start": hour_start, "end": hour_end}
         # Create workbook
         wb = Workbook()
         wb.remove(wb.active)  # Remove default sheet
@@ -2137,7 +2148,215 @@ def api_combined_statistics_export():
                     station["ng"],
                     station["avgcytime"]
                 ])
+        # ======================================================
+        # HOURLY REPORT SHEET
+        # ======================================================
+        ws_hr = wb.create_sheet("Hourly Report")
+        hours_header = [""] + list(range(24))
+        ws_hr.append(hours_header)
 
+        def normalize(rows):
+            d = {int(r["hour"]): int(r["cnt"]) for r in rows}
+            return [d.get(h, 0) for h in range(24)]
+
+        # ======================
+        # ZONE 1 HOURLY
+        # ======================
+        if zone == "zone1":
+            with engine.connect() as conn:
+                ok = conn.execute(text("""
+                    SELECT DATEPART(HOUR, Date_Time) hour, COUNT(*) cnt
+                    FROM ZONE01_REPORTS.dbo.Cell_Report
+                    WHERE Cell_Final_Status = 1
+                      AND Date_Time BETWEEN :start AND :end
+                    GROUP BY DATEPART(HOUR, Date_Time)
+                """), hour_params).mappings().all()
+
+                ng = conn.execute(text("""
+                    SELECT DATEPART(HOUR, Date_Time) hour, COUNT(*) cnt
+                    FROM ZONE01_REPORTS.dbo.Cell_Report
+                    WHERE Cell_Final_Status = 0
+                      AND Date_Time BETWEEN :start AND :end
+                    GROUP BY DATEPART(HOUR, Date_Time)
+                """), hour_params).mappings().all()
+                mod_ok = conn.execute(text("""
+                       SELECT DATEPART(HOUR, Date_Time) hour,
+                              COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                       FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                       WHERE StoredStatus = 1
+                         AND Date_Time BETWEEN :start AND :end
+                       GROUP BY DATEPART(HOUR, Date_Time)
+                   """), hour_params).mappings().all()
+
+                mod_ng = conn.execute(text("""
+                       SELECT DATEPART(HOUR, Date_Time) hour,
+                              COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                       FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                       WHERE StoredStatus = 2
+                         AND Date_Time BETWEEN :start AND :end
+                       GROUP BY DATEPART(HOUR, Date_Time)
+                   """), hour_params).mappings().all()
+
+                mod_inprogress = conn.execute(text("""
+                       SELECT DATEPART(HOUR, Date_Time) hour,
+                              COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                       FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                       WHERE StoredStatus = 0
+                         AND Date_Time BETWEEN :start AND :end
+                       GROUP BY DATEPART(HOUR, Date_Time)
+                   """), hour_params).mappings().all()
+
+            ok_row = normalize(ok)
+            ng_row = normalize(ng)
+            total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+            mod_ok_row = normalize(mod_ok)
+            mod_ng_row = normalize(mod_ng)
+            mod_ip_row = normalize(mod_inprogress)
+
+
+            mod_total_row = [
+                mod_ok_row[i] + mod_ng_row[i] + mod_ip_row[i]
+                for i in range(24)
+            ]
+
+            ws_hr.append(["Cell OK"] + ok_row)
+            ws_hr.append(["Cell NG"] + ng_row)
+            ws_hr.append(["Cell TOTAL"] + total_row)
+
+            ws_hr.append([])
+            ws_hr.append(["MODULE OK"] + mod_ok_row)
+            ws_hr.append(["MODULE NG"] + mod_ng_row)
+            ws_hr.append(["MODULE INPROGRESS"] + mod_ip_row)
+            ws_hr.append(["MODULE TOTAL"] + mod_total_row)
+
+
+        # ======================
+        # ZONE 2 HOURLY
+        # ======================
+        elif zone == "zone2":
+            stations = [
+                "ACIR_Testing_Station",
+                "Laser_Welding_Station",
+                "Negative_Temp_Check_Station",
+                "Polarity_Check_Station",
+                "Routing_Station01",
+                "Routing_Station02",
+                "Routing_Station03"
+            ]
+
+            with engine_zone02.connect() as conn:
+                for st in stations:
+                    ws_hr.append([])
+                    ws_hr.append([st.replace("_", " ")])
+
+                    if st in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+                        ok_sql = f"""
+                            SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                            FROM {st}
+                            WHERE Status01 = 1 AND DateTime BETWEEN :start AND :end
+                            GROUP BY DATEPART(HOUR, DateTime)
+                        """
+                        ng_sql = f"""
+                            SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                            FROM {st}
+                            WHERE Status01 = 2 AND DateTime BETWEEN :start AND :end
+                            GROUP BY DATEPART(HOUR, DateTime)
+                        """
+                    elif st == "Laser_Welding_Station":
+                        ok_sql = """
+                                WITH PerModule AS (
+                                    SELECT
+                                        ModuleBarcodeData,
+                                        DATEPART(HOUR, MIN(DateTime)) AS hour,
+                                        MIN(WeldStatus) AS final_status
+                                    FROM Laser_Welding_Station
+                                    WHERE DateTime BETWEEN :start AND :end
+                                    GROUP BY ModuleBarcodeData
+                                )
+                                SELECT hour, COUNT(*) cnt
+                                FROM PerModule
+                                WHERE final_status = 1
+                                GROUP BY hour
+                            """
+
+                        ng_sql = """
+                                WITH PerModule AS (
+                                    SELECT
+                                        ModuleBarcodeData,
+                                        DATEPART(HOUR, MIN(DateTime)) AS hour,
+                                        MIN(WeldStatus) AS final_status
+                                    FROM Laser_Welding_Station
+                                    WHERE DateTime BETWEEN :start AND :end
+                                    GROUP BY ModuleBarcodeData
+                                )
+                                SELECT hour, COUNT(*) cnt
+                                FROM PerModule
+                                WHERE final_status = 2
+                                GROUP BY hour
+                            """
+                    else:
+                        ok_sql = f"""
+                            SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                            FROM {st}
+                            WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+                            GROUP BY DATEPART(HOUR, DateTime)
+                        """
+                        ng_sql = f"""
+                            SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                            FROM {st}
+                            WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+                            GROUP BY DATEPART(HOUR, DateTime)
+                        """
+
+                    ok = conn.execute(text(ok_sql), hour_params).mappings().all()
+                    ng = conn.execute(text(ng_sql), hour_params).mappings().all()
+
+                    ok_row = normalize(ok)
+                    ng_row = normalize(ng)
+                    total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+                    ws_hr.append(["OK"] + ok_row)
+                    ws_hr.append(["NG"] + ng_row)
+                    ws_hr.append(["TOTAL"] + total_row)
+
+        # ======================
+        # ZONE 3 HOURLY
+        # ======================
+        elif zone == "zone3":
+            stations = [
+                "Leak_Test_Stn",
+                "Weighing_Station",
+                "EOL_Testing_Station",
+                "PDI_Station"
+            ]
+
+            with engine_zone03.connect() as conn:
+                for st in stations:
+                    ws_hr.append([])
+                    ws_hr.append([st.replace("_", " ")])
+
+                    ok = conn.execute(text(f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {st}
+                        WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """), hour_params).mappings().all()
+
+                    ng = conn.execute(text(f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {st}
+                        WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """), hour_params).mappings().all()
+
+                    ok_row = normalize(ok)
+                    ng_row = normalize(ng)
+                    total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+                    ws_hr.append(["OK"] + ok_row)
+                    ws_hr.append(["NG"] + ng_row)
+                    ws_hr.append(["TOTAL"] + total_row)
         # Save to temp file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         wb.save(temp_file.name)
@@ -2172,7 +2391,11 @@ def api_combined_statistics_export_all():
         if not start_dt or not end_dt:
             return jsonify({"error": "start_date and end_date are required"}), 400
 
+        # 🔹 Hourly report uses ONLY start day
+        hour_start = start_dt.replace(hour=0, minute=0, second=0)
+        hour_end = start_dt.replace(hour=23, minute=59, second=59)
         params = {"start": start_dt, "end": end_dt}
+        hour_params = {"start": hour_start, "end": hour_end}
 
         # Create workbook
         wb = Workbook()
@@ -2192,7 +2415,7 @@ def api_combined_statistics_export_all():
 
             module_query = text("""
                 SELECT 
-                      COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
+                    COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
                     SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
                     SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
                     SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
@@ -2223,53 +2446,83 @@ def api_combined_statistics_export_all():
             "ACIR_Testing_Station", "Laser_Welding_Station",
             "Negative_Temp_Check_Station", "Polarity_Check_Station", "Routing_Station01",
             "Routing_Station02", "Routing_Station03", "Top_Cell_Holder_Place_Station",
-            "Visual_Inspection_Station", "Welding_Fixture_Loading_Station", "Wire_Harness_Fixing_Station"
+            "Visual_Inspection_Station", "Welding_Fixture_Loading_Station", "Wire_Harness_Fixing_Station",  "Soldering_Station",
+                "PlasmaCleaning_Stn",
+                "UltrasonicFusion_Stn"
         ]
 
         ws2 = wb.create_sheet("Zone 2")
         ws2.append(["Zone 2 Station Statistics"])
         ws2.append(["Date Range", f"{start} to {end}"])
         ws2.append([])
-        ws2.append(["Station Name", "Total Modules", "OK Modules", "NG Modules"])
+        ws2.append(["Station Name", "Total Modules", "OK Modules", "NG Modules", "Avg Cycle Time"])
 
         with engine_zone02.connect() as conn:
             for station in stations_z2:
                 try:
+                    # Special handling for certain stations
                     if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
                         query = text(f"""
-                            SELECT
-                                COUNT(ModuleBarcodeData) as total,
-                                SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
-                                SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng
-                            FROM (
-                                SELECT ModuleBarcodeData, MIN(Status01) as min_status, MAX(Status01) as max_status
-                                FROM [{station}]
-                                WHERE [DateTime] BETWEEN :start AND :end
-                                GROUP BY ModuleBarcodeData
-                            ) grouped
-                        """)
+                                                   SELECT
+                                                       COUNT(ModuleBarcodeData) as total,
+                                                       SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                                       SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                                       AVG(avg_cycle_time_per_module) AS avg_cycle_time
+                                                   FROM (
+                                                       SELECT ModuleBarcodeData,
+                                                              MIN(Status01) as min_status,
+                                                              MAX(Status01) as max_status,
+                                                               AVG(
+                                                                   CASE 
+                                                                       WHEN CycleTime BETWEEN 60 AND 360 
+                                                                       THEN CycleTime 
+                                                                       ELSE NULL 
+                                                                   END
+                                                               ) AS avg_cycle_time_per_module
+                                                       FROM [{station}]
+                                                       WHERE [DateTime] BETWEEN :start AND :end
+                                                       GROUP BY ModuleBarcodeData
+                                                   ) grouped
+                                               """)
                     elif station == "Laser_Welding_Station":
                         query = text(f"""
-                            SELECT 
-                                COUNT(DISTINCT ModuleBarcodeData) as total,
-                                SUM(CASE WHEN min_status = 1 THEN 1 ELSE 0 END) as total_ok,
-                                SUM(CASE WHEN min_status = 2 THEN 1 ELSE 0 END) as total_ng
-                            FROM (
-                                SELECT ModuleBarcodeData, MIN(WeldStatus) as min_status
-                                FROM [{station}]
-                                WHERE [DateTime] BETWEEN :start AND :end
-                                GROUP BY ModuleBarcodeData
-                            ) grouped
-                        """)
+                                                   SELECT 
+                                                       COUNT(DISTINCT ModuleBarcodeData) as total,
+                                                       SUM(CASE WHEN min_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                                       SUM(CASE WHEN min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                                        AVG(avg_cycle_time_per_module) AS avg_cycle_time
+                                                   FROM (
+                                                       SELECT ModuleBarcodeData,
+                                                              MIN(WeldStatus) as min_status,
+                                                               AVG(
+                                                                   CASE 
+                                                                       WHEN CycleTime BETWEEN 60 AND 360 
+                                                                       THEN CycleTime 
+                                                                       ELSE NULL 
+                                                                   END
+                                                               ) AS avg_cycle_time_per_module
+                                                       FROM [{station}]
+                                                       WHERE [DateTime] BETWEEN :start AND :end
+                                                       GROUP BY ModuleBarcodeData
+                                                   ) grouped
+                                               """)
                     else:
                         query = text(f"""
-                            SELECT 
-                                COUNT(*) as total,
-                                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
-                                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
-                            FROM [{station}]
-                            WHERE [DateTime] BETWEEN :start AND :end
-                        """)
+                                                   SELECT 
+                                                       COUNT(*) as total,
+                                                       SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                                       SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                                      AVG(
+                                                           CASE 
+                                                               WHEN CycleTime BETWEEN 60 AND 360 
+                                                               THEN CycleTime 
+                                                               ELSE NULL 
+                                                           END
+                                                       ) AS avg_cycle_time
+                                                   FROM [{station}]
+                                                   WHERE [DateTime] BETWEEN :start AND :end
+                                               """)
+
 
                     row = conn.execute(query, params).mappings().first() or {}
                     result = dict(row) if row else {}
@@ -2277,12 +2530,14 @@ def api_combined_statistics_export_all():
                     # Safe defaults
                     total_ok = result.get("total_ok", 0) or 0
                     total_ng = result.get("total_ng", 0) or 0
+                    avg_cycle_time = result.get("avg_cycle_time", 0) or 0
                     total = result.get("total", 0) or 0
                     ws2.append([
                         station.replace("_", " "),
                         total,
                         total_ok,
-                        total_ng
+                        total_ng,
+                        avg_cycle_time
                     ])
                 except Exception as e:
                     print(f"Error: {e}")
@@ -2312,19 +2567,26 @@ def api_combined_statistics_export_all():
         ws3.append(["Zone 3 Station Statistics"])
         ws3.append(["Date Range", f"{start} to {end}"])
         ws3.append([])
-        ws3.append(["Station Name", "Total Modules", "OK Modules", "NG Modules"])
+        ws3.append(["Station Name", "Total Modules", "OK Modules", "NG Modules", "Avg Cycle Time"])
 
         with engine_zone03.connect() as conn:
             for station in stations_z3:
                 try:
                     query = text(f"""
-                        SELECT 
-                            COUNT(*) as total,
-                            SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
-                            SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
-                        FROM [{station}]
-                        WHERE [DateTime] BETWEEN :start AND :end
-                    """)
+                                              SELECT 
+                                                  COUNT(*) as total,
+                                                  SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                                  SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                                  AVG(
+                                                      CASE 
+                                                          WHEN CycleTime BETWEEN 60 AND 360 
+                                                          THEN CycleTime 
+                                                          ELSE NULL 
+                                                      END
+                                                  ) AS avg_cycle_time
+                                              FROM [ZONE03_REPORTS].[dbo].[{station}]
+                                              WHERE [DateTime] BETWEEN :start AND :end
+                                          """)
 
                     row = conn.execute(query, params).mappings().first() or {}
                     result = dict(row) if row else {}
@@ -2332,16 +2594,213 @@ def api_combined_statistics_export_all():
                     # Safe defaults
                     total_ok = result.get("total_ok", 0) or 0
                     total_ng = result.get("total_ng", 0) or 0
+                    avg_cycle_time = result.get("avg_cycle_time", 0) or 0
                     total = result.get("total", 0) or 0
                     ws3.append([
                         station.replace("_", " "),
                         total,
                         total_ok,
-                        total_ng
+                        total_ng,
+                        avg_cycle_time
                     ])
                 except Exception as e:
                     print(f"Error: {e}")
                     ws3.append([station.replace("_", " "), 0, 0, 0])
+        # =====================================================
+        # 🔹 HOURLY REPORT SHEET
+        # =====================================================
+        ws_hr = wb.create_sheet("Hourly Report")
+
+        hours_header = [""] + list(range(24))
+
+        def empty_hour_row():
+            return [0] * 24
+
+        def normalize(hourly_rows):
+            data = {int(r["hour"]): int(r["cnt"]) for r in hourly_rows}
+            return [data.get(h, 0) for h in range(24)]
+
+        # =========================
+        # ZONE 1 – CELL REPORT
+        # =========================
+        ws_hr.append(["ZONE 1"])
+        ws_hr.append(hours_header)
+
+        with engine.connect() as conn:
+            ok = conn.execute(text("""
+                SELECT DATEPART(HOUR, Date_Time) AS hour, COUNT(*) cnt
+                FROM ZONE01_REPORTS.dbo.Cell_Report
+                WHERE Cell_Final_Status = 1
+                  AND Date_Time BETWEEN :start AND :end
+                GROUP BY DATEPART(HOUR, Date_Time)
+            """), hour_params).mappings().all()
+
+            ng = conn.execute(text("""
+                SELECT DATEPART(HOUR, Date_Time) AS hour, COUNT(*) cnt
+                FROM ZONE01_REPORTS.dbo.Cell_Report
+                WHERE Cell_Final_Status = 0
+                  AND Date_Time BETWEEN :start AND :end
+                GROUP BY DATEPART(HOUR, Date_Time)
+            """), hour_params).mappings().all()
+            mod_ok = conn.execute(text("""
+                   SELECT DATEPART(HOUR, Date_Time) hour,
+                          COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                   FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                   WHERE StoredStatus = 1
+                     AND Date_Time BETWEEN :start AND :end
+                   GROUP BY DATEPART(HOUR, Date_Time)
+               """), hour_params).mappings().all()
+
+            mod_ng = conn.execute(text("""
+                   SELECT DATEPART(HOUR, Date_Time) hour,
+                          COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                   FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                   WHERE StoredStatus = 2
+                     AND Date_Time BETWEEN :start AND :end
+                   GROUP BY DATEPART(HOUR, Date_Time)
+               """), hour_params).mappings().all()
+
+            mod_inprogress = conn.execute(text("""
+                   SELECT DATEPART(HOUR, Date_Time) hour,
+                          COUNT(DISTINCT Pallet_Identification_Barcode) cnt
+                   FROM ZONE01_REPORTS.dbo.Module_Formation_Report
+                   WHERE StoredStatus = 0
+                     AND Date_Time BETWEEN :start AND :end
+                   GROUP BY DATEPART(HOUR, Date_Time)
+               """), hour_params).mappings().all()
+
+        ok_row = normalize(ok)
+        ng_row = normalize(ng)
+        total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+        mod_ok_row = normalize(mod_ok)
+        mod_ng_row = normalize(mod_ng)
+        mod_ip_row = normalize(mod_inprogress)
+        mod_total_row = [
+            mod_ok_row[i] + mod_ng_row[i] + mod_ip_row[i]
+            for i in range(24)
+        ]
+
+        ws_hr.append(["Cell OK"] + ok_row)
+        ws_hr.append(["Cell NG"] + ng_row)
+        ws_hr.append(["Cell TOTAL"] + total_row)
+        ws_hr.append([])
+
+        ws_hr.append(["MODULE OK"] + mod_ok_row)
+        ws_hr.append(["MODULE NG"] + mod_ng_row)
+        ws_hr.append(["MODULE INPROGRESS"] + mod_ip_row)
+        ws_hr.append(["MODULE TOTAL"] + mod_total_row)
+        ws_hr.append([])
+
+        # =========================
+        # ZONE 2 – STATION REPORT
+        # =========================
+        with engine_zone02.connect() as conn:
+            for station in stations_z2:
+                ws_hr.append([f"ZONE 2 - {station}"])
+                ws_hr.append(hours_header)
+
+                if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+                    ok_sql = f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {station}
+                        WHERE Status01 = 1 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """
+                    ng_sql = f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {station}
+                        WHERE Status01 = 2 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """
+                elif station == "Laser_Welding_Station":
+                    ok_sql = """
+                           WITH PerModule AS (
+                               SELECT
+                                   ModuleBarcodeData,
+                                   DATEPART(HOUR, MIN(DateTime)) AS hour,
+                                   MIN(WeldStatus) AS final_status
+                               FROM Laser_Welding_Station
+                               WHERE DateTime BETWEEN :start AND :end
+                               GROUP BY ModuleBarcodeData
+                           )
+                           SELECT hour, COUNT(*) cnt
+                           FROM PerModule
+                           WHERE final_status = 1
+                           GROUP BY hour
+                       """
+
+                    ng_sql = """
+                           WITH PerModule AS (
+                               SELECT
+                                   ModuleBarcodeData,
+                                   DATEPART(HOUR, MIN(DateTime)) AS hour,
+                                   MIN(WeldStatus) AS final_status
+                               FROM Laser_Welding_Station
+                               WHERE DateTime BETWEEN :start AND :end
+                               GROUP BY ModuleBarcodeData
+                           )
+                           SELECT hour, COUNT(*) cnt
+                           FROM PerModule
+                           WHERE final_status = 2
+                           GROUP BY hour
+                       """
+                else:
+                    ok_sql = f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {station}
+                        WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """
+                    ng_sql = f"""
+                        SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                        FROM {station}
+                        WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+                        GROUP BY DATEPART(HOUR, DateTime)
+                    """
+
+                ok = conn.execute(text(ok_sql), hour_params).mappings().all()
+                ng = conn.execute(text(ng_sql), hour_params).mappings().all()
+
+                ok_row = normalize(ok)
+                ng_row = normalize(ng)
+                total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+                ws_hr.append(["OK"] + ok_row)
+                ws_hr.append(["NG"] + ng_row)
+                ws_hr.append(["TOTAL"] + total_row)
+                ws_hr.append([])
+
+        # =========================
+        # ZONE 3 – STATION REPORT
+        # =========================
+
+        with engine_zone03.connect() as conn:
+            for station in stations_z3:
+                ws_hr.append([f"ZONE 3 - {station}"])
+                ws_hr.append(hours_header)
+
+                ok = conn.execute(text(f"""
+                    SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                    FROM {station}
+                    WHERE Status = 1 AND DateTime BETWEEN :start AND :end
+                    GROUP BY DATEPART(HOUR, DateTime)
+                """), hour_params).mappings().all()
+
+                ng = conn.execute(text(f"""
+                    SELECT DATEPART(HOUR, DateTime) hour, COUNT(*) cnt
+                    FROM {station}
+                    WHERE Status = 2 AND DateTime BETWEEN :start AND :end
+                    GROUP BY DATEPART(HOUR, DateTime)
+                """), hour_params).mappings().all()
+
+                ok_row = normalize(ok)
+                ng_row = normalize(ng)
+                total_row = [ok_row[i] + ng_row[i] for i in range(24)]
+
+                ws_hr.append(["OK"] + ok_row)
+                ws_hr.append(["NG"] + ng_row)
+                ws_hr.append(["TOTAL"] + total_row)
+                ws_hr.append([])
 
         # Save file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -2390,8 +2849,8 @@ def fetch_datatable_allinone():
             filters.append("[DateTime] BETWEEN :start AND :end")
             params["start"] = start_date
             params["end"] = end_date
-        elif barcode:
-            filters.append("FGNumber = :barcode")
+        if barcode:
+            filters.append("FGNumber = :barcode OR SFGNumber = :barcode OR Module01_ID = :barcode OR Module02_ID = :barcode")
             params["barcode"] = barcode
 
         where_clause = " AND ".join(filters) if filters else "1=1"
@@ -2417,41 +2876,6 @@ def fetch_datatable_allinone():
             columns = result.keys()  # ordered list of columns
             rows = [dict(zip(columns, row)) for row in result.fetchall()]
 
-        def format_datetime(value):
-            """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
-            # print(value)
-            if isinstance(value, datetime):
-                return value.strftime("%d %b %Y %H:%M:%S")
-            try:
-                # parsed = datetime.fromisoformat(str(value).replace("Z", ""))
-                return value.strftime("%d %b %Y %H:%M:%S")
-            except Exception:
-                return value  # leave unchanged if parsing fails
-
-        def format_float(value):
-            """Format value to 4 decimal places if it's a float or numeric string."""
-            try:
-                # Convert to float once
-                fval = float(value)
-                # Check if original was string and contained a decimal point
-                if (isinstance(value, str) or isinstance(value, float)) or "." in value:
-
-                    return f"{fval:.4f}"
-                else:
-                    return value  # leave ints or non-floats unchanged
-            except (ValueError, TypeError):
-                return value  # leave as is if not numeric
-
-        for row in rows:
-            for k, v in row.items():
-                if k.lower() == "datetime":
-                    row[k] = format_datetime(v)
-                elif isinstance(v, float):
-                    if v == 0.0:
-                        continue  # skip formatting 0.0
-                    if "status" in k.lower():
-                        continue  # skip status fields
-                    row[k] = format_float(v)
 
         return jsonify({
             "columns": list(columns),  # 👈 send ordered columns to UI
@@ -2468,7 +2892,7 @@ def fetch_datatable_allinone():
 def fetch_allinone_data():
     try:
         body = request.get_json(force=True) or {}
-
+        fg = body.get('fg_id')
         sfg = body.get("sfg_id")
         m1 = body.get("module01_id")
         m2 = body.get("module02_id")
@@ -2481,70 +2905,133 @@ def fetch_allinone_data():
         # ---------------------------
         barcode_conditions = []
         acir_barcode_conditions = []
+        leak_barcode_conditions = []
+        weight_barcode_conditions =[]
         params = {}
-
+        if fg:
+            barcode_conditions.append("LOWER(M.Pallet_Identification_Barcode) = :fg")
+            acir_barcode_conditions.append("ModuleBarcodeData = :fg")
+            leak_barcode_conditions.append("FGBarcodeData = :fg")
+            weight_barcode_conditions.append("FGBarcode_Data = :fg")
+            params["fg"] = fg
         if sfg:
-            barcode_conditions.append("M.Pallet_Identification_Barcode = :sfg")
+            barcode_conditions.append("LOWER(M.Pallet_Identification_Barcode) = :sfg")
             acir_barcode_conditions.append("ModuleBarcodeData = :sfg")
+            leak_barcode_conditions.append("FGBarcodeData = :sfg")
+            weight_barcode_conditions.append("FGBarcode_Data = :sfg")
             params["sfg"] = sfg
         if m1:
-            barcode_conditions.append("M.Pallet_Identification_Barcode = :m1")
+            barcode_conditions.append("LOWER(M.Pallet_Identification_Barcode) = :m1")
             acir_barcode_conditions.append("ModuleBarcodeData = :m1")
+            leak_barcode_conditions.append("FGBarcodeData = :m1")
+            weight_barcode_conditions.append("FGBarcode_Data = :m1")
             params["m1"] = m1
         if m2:
-            barcode_conditions.append("M.Pallet_Identification_Barcode = :m2")
+            barcode_conditions.append("LOWER(M.Pallet_Identification_Barcode) = :m2")
             acir_barcode_conditions.append("ModuleBarcodeData = :m2")
+            leak_barcode_conditions.append("FGBarcodeData = :m2")
+            weight_barcode_conditions.append("FGBarcode_Data = :m2")
             params["m2"] = m2
 
         where_sql = " OR ".join(barcode_conditions)
         acir_where_sql = " OR ".join(acir_barcode_conditions)
-        # ==========================================================
-        # MODULE FORMATION + CELL DATA
-        # ==========================================================
+        leak_where_sql = " OR ".join(leak_barcode_conditions)
+        weight_where_sql = " OR ".join(weight_barcode_conditions)
+
         module_sql = text(f"""
-        ;WITH LatestCell AS (
-            SELECT *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY Cell_Barcode
-                    ORDER BY 
-                        CASE WHEN Cell_Capacity_Actual = 9999 THEN 1 ELSE 0 END,
-                        Date_Time DESC
-                ) rn
-            FROM ZONE01_REPORTS.dbo.Cell_Report
-        ),
-        ModuleCells AS (
-            SELECT
-                M.Date_Time,
-                M.Shift,
-                M.Operator,
-                M.Module_Type,
-                M.Module_Grade,
-                M.StoredStatus AS Status,
-                M.Pallet_Identification_Barcode AS ModuleBarcodeData,
-                V.Cell_Barcode,
-                ROW_NUMBER() OVER (
-                    PARTITION BY M.Pallet_Identification_Barcode
-                    ORDER BY (SELECT NULL)
-                ) AS Position
-            FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
-            CROSS APPLY (VALUES
-                (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
-                (M.Barcode05),(M.Barcode06),(M.Barcode07),(M.Barcode08),
-                (M.Barcode09),(M.Barcode10),(M.Barcode11),(M.Barcode12),
-                (M.Barcode13),(M.Barcode14),(M.Barcode15),(M.Barcode16)
-            ) V(Cell_Barcode)
-            WHERE V.Cell_Barcode IS NOT NULL
-              AND ({where_sql})
-        )
-        SELECT
-            MC.*,
-            L.Cell_Voltage_Actual,
-            L.Cell_Resistance_Actual
-        FROM ModuleCells MC
-        LEFT JOIN LatestCell L
-            ON MC.Cell_Barcode = L.Cell_Barcode AND L.rn = 1
-        ORDER BY MC.Date_Time DESC, MC.Position
-        """)
+                   ;WITH LatestCell AS (
+                       SELECT 
+                           CR.Cell_Barcode,
+                           CR.Cell_Capacity_Actual,
+                           CR.Cell_Voltage_Actual,
+                           CR.Cell_Resistance_Actual,
+                           CR.Date_Time,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY CR.Cell_Barcode
+                                ORDER BY 
+                                    CASE 
+                                        WHEN CR.Cell_Capacity_Actual = 999999 THEN 1 
+                                        ELSE 0 
+                                    END,              -- prefer non-999999
+                                    CR.Date_Time DESC -- then latest
+                            ) AS rn
+                       FROM ZONE01_REPORTS.dbo.Cell_Report CR
+                   )
+                   , ModuleCells AS (
+                       SELECT 
+                           M.Date_Time,
+                           M.Shift,
+                           M.Operator,
+                           M.Module_Type,
+                           M.Module_Grade,
+                           M.Pallet_Identification_Barcode AS Module_ID,
+                           V.Cell_Barcode AS Cell_ID,
+                           M.CapacityMinimum,
+                           M.CapacityMaximum,
+                           M.CapacityName,
+                           M.StoredStatus AS Status
+                       FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
+                       CROSS APPLY (VALUES
+                           (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
+                           (M.Barcode05),(M.Barcode06),(M.Barcode07),(M.Barcode08),
+                           (M.Barcode09),(M.Barcode10),(M.Barcode11),(M.Barcode12),
+                           (M.Barcode13),(M.Barcode14),(M.Barcode15),(M.Barcode16),
+                           (M.Barcode17),(M.Barcode18),(M.Barcode19),(M.Barcode20),
+                           (M.Barcode21),(M.Barcode22),(M.Barcode23),(M.Barcode24),
+                           (M.Barcode25),(M.Barcode26),(M.Barcode27),(M.Barcode28),
+                           (M.Barcode29),(M.Barcode30),(M.Barcode31),(M.Barcode32),
+                           (M.Barcode33),(M.Barcode34),(M.Barcode35),(M.Barcode36),
+                           (M.Barcode37),(M.Barcode38),(M.Barcode39),(M.Barcode40),
+                           (M.Barcode41),(M.Barcode42),(M.Barcode43),(M.Barcode44),
+                           (M.Barcode45),(M.Barcode46),(M.Barcode47),(M.Barcode48)
+                       ) V(Cell_Barcode)
+                       WHERE V.Cell_Barcode IS NOT NULL AND V.Cell_Barcode <> '' 
+                         AND {where_sql}
+                   )
+                   , ModuleAgg AS (
+                       SELECT 
+                           MC.Module_ID,
+                           MIN(L.Cell_Capacity_Actual) AS Min_Capacity,
+                           MAX(L.Cell_Capacity_Actual) AS Max_Capacity,
+                           MIN(L.Cell_Voltage_Actual) AS Min_Voltage,
+                           MAX(L.Cell_Voltage_Actual) AS Max_Voltage,
+                           MIN(L.Cell_Resistance_Actual) AS Min_Resistance,
+                           MAX(L.Cell_Resistance_Actual) AS Max_Resistance
+                       FROM ModuleCells MC
+                       LEFT JOIN LatestCell L
+                           ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
+                       GROUP BY MC.Module_ID
+                   )
+                   SELECT 
+                       ROW_NUMBER() OVER (ORDER BY MC.Date_Time, MC.Module_ID, MC.Cell_ID) AS [SrNo],
+                       MC.Date_Time,
+                       MC.Shift,
+                       MC.Operator,
+                       MC.Module_Type,
+                       MC.Module_Grade,
+                       MC.Module_ID,
+                       MC.Cell_ID,
+                       L.Cell_Capacity_Actual,
+                       L.Cell_Voltage_Actual,
+                       L.Cell_Resistance_Actual,
+                       CAST(MC.CapacityMinimum AS VARCHAR(20)) + '-' + CAST(MC.CapacityMaximum AS VARCHAR(20)) AS Module_Capacity_Range,
+                       MC.CapacityName AS Module_Capacity_Name,
+                       MC.Status,
+                       CAST(MA.Min_Capacity AS VARCHAR(20)) AS Module_Capacity_Min,
+                        CAST(MA.Max_Capacity AS VARCHAR(20)) AS Module_Capacity_Max,
+                        CAST(MA.Min_Voltage AS VARCHAR(20)) AS Module_Voltage_Min,
+                        CAST(MA.Max_Voltage AS VARCHAR(20)) AS Module_Voltage_Max,
+                        CAST(MA.Min_Resistance AS VARCHAR(20)) AS Module_Resistance_Min,
+                        CAST(MA.Max_Resistance AS VARCHAR(20)) AS Module_Resistance_Max
+                   FROM ModuleCells MC
+                   LEFT JOIN LatestCell L
+                       ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
+                   LEFT JOIN ModuleAgg MA
+                       ON MC.Module_ID = MA.Module_ID
+                   ORDER BY MC.Date_Time, MC.Module_ID, [SrNo]
+                   ;
+               """)
+        # ==========================================================
 
         with engine.connect() as conn:
             module_rows = conn.execute(module_sql, params).mappings().all()
@@ -2556,30 +3043,48 @@ def fetch_allinone_data():
         # ---------------------------
         # GROUP BY MODULE
         # ---------------------------
-        combined = {}
+        if len(module_rows)>0:
+            ModuleDateTime = module_rows[0]["Date_Time"].strftime("%d %b %Y %H:%M:%S")
+            ModuleShift = module_rows[0]["Shift"],
+            ModuleOperator = module_rows[0]["Operator"],
+            ModuleType = module_rows[0]["Module_Type"],
+            ModuleBarcodeData = fg
+            capacity_min_list = [
+                float(r["Module_Capacity_Min"]) for r in module_rows if r["Module_Capacity_Min"]
+            ]
 
-        for r in module_rows:
-            mid = r["ModuleBarcodeData"]
+            capacity_max_list = [
+                float(r["Module_Capacity_Max"]) for r in module_rows if r["Module_Capacity_Max"]
+            ]
 
-            if mid not in combined:
-                combined[mid] = {
-                    "DateTime": r["Date_Time"].strftime("%d %b %Y %H:%M:%S"),
-                    "Shift": r["Shift"],
-                    "Operator": r["Operator"],
-                    "ModuleBarcodeData": mid,
-                    "Status": r["Status"],
-                    "Position": [],
-                    "Voltage": [],
-                    "Resistance": []
-                }
+            voltage_min_list = [
+                float(r["Module_Voltage_Min"]) for r in module_rows if r["Module_Voltage_Min"]
+            ]
 
-            combined[mid]["Position"].append(r["Position"])
-            combined[mid]["Voltage"].append(
-                str(round(r["Cell_Voltage_Actual"], 4)) if r["Cell_Voltage_Actual"] else "0"
-            )
-            combined[mid]["Resistance"].append(
-                str(round(r["Cell_Resistance_Actual"], 4)) if r["Cell_Resistance_Actual"] else "0"
-            )
+            voltage_max_list = [
+                float(r["Module_Voltage_Max"]) for r in module_rows if r["Module_Voltage_Max"]
+            ]
+
+            resistance_min_list = [
+                float(r["Module_Resistance_Min"]) for r in module_rows if r["Module_Resistance_Min"]
+            ]
+
+            resistance_max_list = [
+                float(r["Module_Resistance_Max"]) for r in module_rows if r["Module_Resistance_Max"]
+            ]
+
+            CellCapacityDiff= round(max(capacity_max_list) - min(capacity_min_list),4)
+            CellVoltageDiff= round((max(voltage_max_list) - min(voltage_min_list))*1000,4)
+            CellResistanceDiff= round(max(resistance_max_list) - min(resistance_min_list),4)
+        else:
+            ModuleDateTime = "Not Found"
+            ModuleShift = "Not Found"
+            ModuleOperator = "Not Found"
+
+            ModuleBarcodeData = fg
+            CellCapacityDiff= "Not Found"
+            CellVoltageDiff= "Not Found"
+            CellResistanceDiff= "Not Found"
 
         # ==========================================================
         # ACIR DATA
@@ -2590,38 +3095,109 @@ def fetch_allinone_data():
         WHERE {acir_where_sql}
         """)
 
-        barcodes = tuple(combined.keys())
-
         with engine_zone02.connect() as conn:
             acir_rows = conn.execute(
                 acir_sql, params
             ).mappings().all()
+        if len(acir_rows) > 0:
+            Pack_Level_Resistance = round(float(acir_rows[0]["Pack_Level_Resistance"]),4)
+            Pack_Level_Voltage = round(float(acir_rows[0]["Pack_Level_Voltage"]),4)
+            Pack_Level_Resistance_Module02 = round(float(acir_rows[0]["Pack_Level_Resistance_Module02"]),4)
+            Pack_Level_Voltage_Module02 = round(float(acir_rows[0]["Pack_Level_Voltage_Module02"]),4)
+            String_Level_IR_Diff_Max_Min = round(float(acir_rows[0]["String_Level_IR_Diff_Max_Min"]),4)
+            String_Level_V_Diff_Max_Min = round(float(acir_rows[0]["String_Level_V_Diff_Max_Min"])*1000,4)
+            Module_Level_Resistance = round(float(acir_rows[0]["Module_Level_Resistance"]),4)
 
-        for r in acir_rows:
-            mid = r["ModuleBarcodeData"]
-            if mid in combined:
-                combined[mid].update({
-                    "Pack_Level_Resistance": r.get("Pack_Level_Resistance", 0),
-                    "Pack_Level_Voltage": r.get("Pack_Level_Voltage", 0),
-                    "Pack_Level_Resistance_Module02": r.get("Pack_Level_Resistance_Module02", 0),
-                    "Pack_Level_Voltage_Module02": r.get("Pack_Level_Voltage_Module02", 0),
-                    "String_Level_IR_Diff_Max_Min": r.get("String_Level_IR_Diff_Max_Min", 0),
-                    "String_Level_V_Diff_Max_Min": r.get("String_Level_V_Diff_Max_Min", 0),
-                    "Module_Level_Resistance": r.get("Module_Level_Resistance", 0),
-                    "CycleTime": r.get("CycleTime", 0)
-                })
+        else:
+            Pack_Level_Resistance = "Not Found"
+            Pack_Level_Voltage = "Not Found"
+            Pack_Level_Resistance_Module02 = "Not Found"
+            Pack_Level_Voltage_Module02 = "Not Found"
+            String_Level_IR_Diff_Max_Min = "Not Found"
+            String_Level_V_Diff_Max_Min = "Not Found"
+            Module_Level_Resistance = "Not Found"
+            CycleTime = "Not Found"
 
+        # ==========================================================
+        # Weight DATA
+        # ==========================================================
+        weight_sql = text(f"""
+         SELECT *
+            FROM (
+                SELECT Actual_Weight,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY FGBarcode_Data
+                           ORDER BY DateTime DESC
+                       ) AS rn
+                FROM ZONE03_REPORTS.dbo.Weighing_Station
+                WHERE {weight_where_sql}
+            ) t
+            WHERE rn = 1
+        """)
+
+
+        with engine_zone03.connect() as conn:
+            weight_rows = conn.execute(
+                weight_sql, params
+            ).mappings().all()
+        if len(weight_rows) >0:
+            weight = round(float(weight_rows[0]["Actual_Weight"]),4)
+        else:
+            weight = "Not Found"
+        # ==========================================================
+        # Leak DATA
+        # ==========================================================
+        leak_sql = text(f"""
+            SELECT *
+            FROM (
+                SELECT Leak_Rate,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY FGBarcodeData
+                           ORDER BY DateTime DESC
+                       ) AS rn
+                FROM ZONE03_REPORTS.dbo.Leak_Test_Stn
+                WHERE {leak_where_sql}
+            ) t
+            WHERE rn = 1
+        """)
+        with engine_zone03.connect() as conn:
+            leak_rows = conn.execute(
+                leak_sql, params
+            ).mappings().all()
+        if len(leak_rows) >0:
+            Leak_rate = round(float(leak_rows[0]["Leak_Rate"]),4)
+        else:
+            Leak_rate = "Not Found"
         # ==========================================================
         # FINAL RESPONSE
         # ==========================================================
         columns = [
             "DateTime","Shift","Operator","ModuleBarcodeData",
-            "Position","Voltage","Resistance",
+            "CapacityDiff","VoltageDiff","ResistanceDiff",
             "Pack_Level_Resistance","Pack_Level_Voltage",
             "Pack_Level_Resistance_Module02","Pack_Level_Voltage_Module02",
             "String_Level_IR_Diff_Max_Min","String_Level_V_Diff_Max_Min",
-            "Module_Level_Resistance","Status","CycleTime"
+            "Module_Level_Resistance","LeakRate","Weight"
         ]
+        combined={
+            "DateTime" : ModuleDateTime,
+            "Shift":ModuleShift,
+            "Operator":ModuleOperator,
+            "ModuleBarcodeData": ModuleBarcodeData,
+
+            "CapacityDiff":CellCapacityDiff,
+            "VoltageDiff":CellVoltageDiff,
+            "ResistanceDiff":CellResistanceDiff,
+            "Pack_Level_Resistance":Pack_Level_Resistance,
+            "Pack_Level_Voltage":Pack_Level_Voltage,
+            "Pack_Level_Resistance_Module02":Pack_Level_Resistance_Module02,
+            "Pack_Level_Voltage_Module02":Pack_Level_Voltage_Module02,
+            "String_Level_IR_Diff_Max_Min":String_Level_IR_Diff_Max_Min,
+            "String_Level_V_Diff_Max_Min":String_Level_V_Diff_Max_Min,
+            "Module_Level_Resistance":Module_Level_Resistance,
+            "LeakRate":Leak_rate,
+            "Weight":weight,
+        }
 
         return jsonify({
             "columns": columns,
@@ -2639,94 +3215,185 @@ def fetch_allinone_data():
 def export_excel_allinone():
     try:
         body = request.get_json(force=True) or {}
-        station_table = "Z03_SFG_FG_ID_Linkage"  # 👈 Table name
         barcode = body.get("barcode")
         start_date = parse_date(body.get("start_date"))
         end_date = parse_date(body.get("end_date"))
 
-        if not station_table:
-            return jsonify({"error": "station_name (table) is required"}), 400
-
-        # Build filters
+        # ======================================================
+        # 1️⃣ LINKAGE (ZONE03) – DRIVER
+        # ======================================================
         filters, params = [], {}
+
         if start_date and end_date:
-            filters.append("[DateTime] BETWEEN :start AND :end")
+            filters.append("DateTime BETWEEN :start AND :end")
             params["start"] = start_date
             params["end"] = end_date
+
         if barcode:
-            filters.append("Barcode = :barcode")
+            filters.append("""
+                FGNumber = :barcode OR
+                SFGNumber = :barcode OR
+                Module01_ID = :barcode OR
+                Module02_ID = :barcode
+            """)
             params["barcode"] = barcode
 
-        where_clause = " AND ".join(filters) if filters else "1=1"
+        where_sql = " AND ".join(filters) if filters else "1=1"
 
-        query = text(f"""
-            SELECT * FROM [{station_table}]
-            WHERE {where_clause}
-            ORDER BY [DateTime] DESC
-        """)
-        # Total count
-        count_query = text(f"""
-            SELECT COUNT(*) as total FROM [{station_table}]
-            WHERE {where_clause}
-        """)
-        # Status counts
-        status_query = text(f"""
-            SELECT 
-                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
-                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
-            FROM [{station_table}]
-            WHERE {where_clause}
+        linkage_sql = text(f"""
+            SELECT *
+            FROM Z03_SFG_FG_ID_Linkage
+            WHERE {where_sql}
+            ORDER BY DateTime DESC
         """)
 
         with engine_zone02.connect() as conn:
-            df = pd.read_sql(query, conn, params=params)
-            dfcount = pd.read_sql(count_query, conn, params=params)
-            dfstats = pd.read_sql(status_query, conn, params=params)
-        # Save Excel inside project exports/
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_station = station_table.replace(" ", "_")
-        filename = f"{safe_station}_{timestamp}.xlsx"
+            linkage_df = pd.read_sql(linkage_sql, conn, params=params)
 
-        export_dir = os.path.join(app.root_path, "exports")
-        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
-        filepath = os.path.join(export_dir, filename)
+        if linkage_df.empty:
+            return jsonify({"error": "No linkage data found"}), 404
 
-        # filepath = os.path.join(export_dir, filename)
-        # df.to_excel(filepath, index=False)
-        # ---- Write Excel with stats on top ----
-        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-            # 1) Write summary statistics at top
-            stats_summary = pd.DataFrame({
-                "Metric": ["Total Count", "Total OK", "Total NG"],
-                "Value": [
-                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
-                    int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
-                    int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
-                ]
-            })
-            if stats_summary.empty:
-                # Write a placeholder message so at least one sheet is visible
-                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
-                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
-            else:
-                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+        # ======================================================
+        # 2️⃣ BUILD BARCODE SET
+        # ======================================================
+        barcode_cols = ["FGNumber","SFGNumber", "Module01_ID", "Module02_ID"]
+        all_barcodes = (
+            linkage_df[barcode_cols]
+            .astype(str)
+            .replace("nan", None)
+            .values.ravel()
+            .tolist()
+        )
+        all_barcodes = list({b for b in all_barcodes if b})
 
-            # 2) Leave a gap then write the actual data
-            startrow = len(stats_summary) + 3  # 3-row gap
-            if df.empty:
-                # Write a placeholder message so at least one sheet is visible
-                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
-                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
-            else:
-                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+        # ======================================================
+        # 3️⃣ MODULE (ZONE01) – LATEST PER BARCODE
+        # ======================================================
+        module_sql = """
+        ;WITH LatestCell AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY Cell_Barcode ORDER BY Date_Time DESC
+            ) rn
+            FROM Cell_Report
+        )
+        SELECT
+            M.Pallet_Identification_Barcode AS Barcode,
+            MAX(M.Date_Time) AS Module_DateTime,
+            MAX(M.Shift) AS Module_Shift,
+            MAX(M.Operator) AS Module_Operator,
+            MAX(M.Module_Type) AS ModuleType,
+            ROUND(MAX(L.Cell_Capacity_Actual) - MIN(L.Cell_Capacity_Actual), 4) AS CapacityDiff,
+            ROUND(MAX(L.Cell_Voltage_Actual) - MIN(L.Cell_Voltage_Actual), 4) AS VoltageDiff,
+            ROUND(MAX(L.Cell_Resistance_Actual) - MIN(L.Cell_Resistance_Actual), 4) AS ResistanceDiff
+        FROM Module_Formation_Report M
+        JOIN LatestCell L
+            ON L.Cell_Barcode IN (
+                M.Barcode01, M.Barcode02, M.Barcode03, M.Barcode04,
+                M.Barcode05, M.Barcode06, M.Barcode07, M.Barcode08,
+                M.Barcode09, M.Barcode10, M.Barcode11, M.Barcode12,
+                M.Barcode13, M.Barcode14, M.Barcode15, M.Barcode16,
+                M.Barcode17, M.Barcode18, M.Barcode19, M.Barcode20,
+                M.Barcode21, M.Barcode22, M.Barcode23, M.Barcode24,
+                M.Barcode25, M.Barcode26, M.Barcode27, M.Barcode28,
+                M.Barcode29, M.Barcode30, M.Barcode31, M.Barcode32,
+                M.Barcode33, M.Barcode34, M.Barcode35, M.Barcode36,
+                M.Barcode37, M.Barcode38, M.Barcode39, M.Barcode40,
+                M.Barcode41, M.Barcode42, M.Barcode43, M.Barcode44,
+                M.Barcode45, M.Barcode46, M.Barcode47, M.Barcode48
+            )
+        WHERE L.rn = 1
+        GROUP BY M.Pallet_Identification_Barcode
+        """
 
-        return send_file(filepath, as_attachment=True)
+        with engine.connect() as conn:
+            module_df = pd.read_sql(module_sql, conn)
 
-        # return send_file(filepath, as_attachment=True)
+        module_map = module_df.set_index("Barcode").to_dict("index")
+        # ======================================================
+        # 4️⃣ ACIR (ZONE02) – LATEST
+        # ======================================================
+        acir_sql = """
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY ModuleBarcodeData ORDER BY DateTime DESC
+            ) rn
+            FROM ACIR_Testing_Station
+        ) t WHERE rn = 1
+        """
+
+        with engine_zone02.connect() as conn:
+            acir_df = pd.read_sql(acir_sql, conn)
+
+        acir_map = acir_df.set_index("ModuleBarcodeData").to_dict("index")
+
+        # ======================================================
+        # 5️⃣ LEAK + WEIGHT (ZONE03)
+        # ======================================================
+        leak_df = pd.read_sql("""
+            SELECT *
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY FGBarcodeData ORDER BY DateTime DESC
+                ) rn
+                FROM Leak_Test_Stn
+            ) t WHERE rn = 1
+        """, engine_zone03)
+
+        weight_df = pd.read_sql("""
+            SELECT *
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY FGBarcode_Data ORDER BY DateTime DESC
+                ) rn
+                FROM Weighing_Station
+            ) t WHERE rn = 1
+        """, engine_zone03)
+
+        leak_map = leak_df.set_index("FGBarcodeData").to_dict("index")
+        weight_map = weight_df.set_index("FGBarcode_Data").to_dict("index")
+
+        # ======================================================
+        # 6️⃣ FINAL MERGE (FAST HASH LOOKUP)
+        # ======================================================
+        final_rows = []
+
+        for _, r in linkage_df.iterrows():
+            row = r.to_dict()
+            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
+                if bc in module_map:
+                    row.update(module_map[bc])
+                    break
+            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
+                if bc in acir_map:
+                    row.update(acir_map[bc])
+                    break
+            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
+                if bc in leak_map:
+                    row["LeakRate"] = round(leak_map[bc]["Leak_Rate"], 4)
+                    break
+            for bc in [r["SFGNumber"], r["Module01_ID"], r["Module02_ID"]]:
+                if bc in weight_map:
+                    row["Weight"] = round(weight_map[bc]["Actual_Weight"], 4)
+                    break
+
+            final_rows.append(row)
+
+        final_df = pd.DataFrame(final_rows).fillna("Not Found")
+
+        # ======================================================
+        # 7️⃣ EXPORT
+        # ======================================================
+        filename = f"ALL_IN_ONE_EXPORT_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+        path = os.path.join(app.root_path, "exports", filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        final_df.to_excel(path, index=False)
+
+        return send_file(path, as_attachment=True)
 
     except Exception as e:
-        print("❌ SQL ERROR (Excel):", e)
-        return jsonify({"error": f"Export failed: {e}"}), 500
+        print("❌ EXPORT ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 
 # -----------------------
 # Run (use Gunicorn/Nginx in prod)

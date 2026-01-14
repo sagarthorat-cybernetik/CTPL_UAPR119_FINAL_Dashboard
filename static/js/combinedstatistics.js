@@ -95,7 +95,7 @@ async function getStatistics() {
         document.getElementById('loadingIndicator').style.display = 'none';
 
         // Display based on zone
-        if (zone === 'zone1') {
+        if (zone === 'zone1' ) {
             displayZone1Stats(data);
         } else if (zone === 'zone2') {
             displayZone2Stats(data);
@@ -114,22 +114,29 @@ async function getStatistics() {
 }
 
 function displayZone1Stats(data) {
-    // Display cell stats
-    document.getElementById('z1TotalCells').textContent = data.cells.total.toLocaleString();
-    document.getElementById('z1OkCells').textContent = data.cells.ok.toLocaleString();
-    document.getElementById('z1NgCells').textContent = data.cells.ng.toLocaleString();
+    try{
+        // Display cell stats
+        document.getElementById('z1TotalCells').textContent = data.cells.total.toLocaleString();
+        document.getElementById('z1OkCells').textContent = data.cells.ok.toLocaleString();
+        document.getElementById('z1NgCells').textContent = data.cells.ng.toLocaleString();
 
-    // Display module stats
-    document.getElementById('z1TotalModules').textContent = data.modules.total.toLocaleString();
-    document.getElementById('z1OkModules').textContent = data.modules.ok.toLocaleString();
-    document.getElementById('z1NgModules').textContent = data.modules.ng.toLocaleString();
-    document.getElementById('z1InProgressModules').textContent = data.modules.inprogress.toLocaleString();
+        // Display module stats
+        document.getElementById('z1TotalModules').textContent = data.modules.total.toLocaleString();
+        document.getElementById('z1OkModules').textContent = data.modules.ok.toLocaleString();
+        document.getElementById('z1NgModules').textContent = data.modules.ng.toLocaleString();
+        document.getElementById('z1InProgressModules').textContent = data.modules.inprogress.toLocaleString();
 
-    // Show zone 1 content
-    document.getElementById('zone1Content').style.display = 'block';
+        // Show zone 1 content
+        document.getElementById('zone1Content').style.display = 'block';
+    }catch (error) {
+        document.getElementById('loadingIndicator').style.display = 'none';
+        showError('No Data Found For This Date Range : ' + error.message);
+        console.error('No Data Found For This Date Range : ', error);
+    }
 }
 
 function displayZone2Stats(data) {
+try{
     const tbody = document.getElementById('zone2TableBody');
     tbody.innerHTML = '';
 
@@ -166,9 +173,15 @@ function displayZone2Stats(data) {
 
     // Show zone 2 content
     document.getElementById('zone2Content').style.display = 'block';
+    }catch (error) {
+        document.getElementById('loadingIndicator').style.display = 'none';
+        showError('No Data Found For This Date Range : ' + error.message);
+        console.error('No Data Found For This Date Range : ', error);
+    }
 }
 
 function displayZone3Stats(data) {
+try{
     const tbody = document.getElementById('zone3TableBody');
     tbody.innerHTML = '';
 
@@ -204,6 +217,11 @@ function displayZone3Stats(data) {
 
     // Show zone 3 content
     document.getElementById('zone3Content').style.display = 'block';
+    }catch (error) {
+        document.getElementById('loadingIndicator').style.display = 'none';
+        showError('No Data Found For This Date Range : ' + error.message);
+        console.error('No Data Found For This Date Range : ', error);
+    }
 }
 
 async function exportCurrentZone() {

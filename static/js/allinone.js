@@ -70,7 +70,7 @@ async function loadPage(page = 1) {
     });
 
     if (!res.ok) throw new Error("Failed to fetch");
-
+    console.log(f)
     // 🔑 handle gzip OR plain JSON
     let result;
     const contentType = res.headers.get("Content-Type") || "";
@@ -100,21 +100,18 @@ async function loadPage(page = 1) {
   }
 }
 
-async function getallinonedata(sfgid, module01_id , module02_id) {
-    console.log(sfgid)
-    console.log(module01_id)
-    console.log(module02_id)
+async function getallinonedata(fg_id,sfgid, module01_id , module02_id) {
+
   showLoader();
   try {
     const res = await fetch("/fetch_allinone_data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sfg_id: sfgid, module01_id: module01_id, module02_id: module02_id })
+      body: JSON.stringify({ fg_id:fg_id, sfg_id: sfgid, module01_id: module01_id, module02_id: module02_id })
     });
     if (!res.ok) throw new Error("Failed to fetch all-in-one data");
     const result = await res.json();
     if (result.error) throw new Error(result.error);
-    console.log(result.data)
     renderallinoneTable(result.data || [], result.columns || []);
   } catch (err) {
     console.error("Error loading all-in-one data:", err);
@@ -139,39 +136,70 @@ function rendersummary(total, total_ok, total_ng) {
 
 // === Render Table ===
 function renderTable(data, columns) {
-  const table = document.getElementById("dataTable");
+
+    const table = document.getElementById("dataTable");
     table.innerHTML = "";
 
     // --- Table Head ---
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
+
     columns.forEach(col => {
         const th = document.createElement("th");
         th.textContent = col;
         headRow.appendChild(th);
     });
+
     thead.appendChild(headRow);
-    // call the rendering for all-in-one table for first row data only
-    const sfgid = data[0]["SFGNumber"];
-    const module01_id = data[0]["Module01_ID"]
-    const module02_id = data[0]["Module02_ID"]
-    getallinonedata(sfgid, module01_id ,module02_id);
+    table.appendChild(thead);
+
+    // 🔹 Auto-load first row (existing behavior)
+    if (data.length > 0) {
+        getallinonedata(
+            data[0]["FGNumber"],
+            data[0]["SFGNumber"],
+            data[0]["Module01_ID"],
+            data[0]["Module02_ID"]
+        );
+    }
+
     // --- Table Body ---
     const tbody = document.createElement("tbody");
-    data.forEach(row => {
 
+    data.forEach((row, index) => {
         const tr = document.createElement("tr");
+
+        // 👉 Make row clickable
+        tr.style.cursor = "pointer";
+
+        tr.addEventListener("click", () => {
+            const fg_id = row["FGNumber"];
+            const sfg_id = row["SFGNumber"];
+            const module01_id = row["Module01_ID"];
+            const module02_id = row["Module02_ID"];
+
+            console.log("Row clicked:", fg_id, sfg_id, module01_id, module02_id);
+
+            getallinonedata(fg_id, sfg_id, module01_id, module02_id);
+
+            // Optional: highlight selected row
+            document.querySelectorAll("#dataTable tbody tr")
+                .forEach(r => r.classList.remove("selected-row"));
+            tr.classList.add("selected-row");
+        });
+
         columns.forEach(col => {
             const td = document.createElement("td");
             td.textContent = row[col] !== null ? row[col] : "";
             tr.appendChild(td);
         });
+
         tbody.appendChild(tr);
     });
 
-    table.appendChild(thead);
     table.appendChild(tbody);
 }
+
 
 function renderallinoneTable(data, columns) {
   const table = document.getElementById("all-in-one-dataTable");
@@ -187,15 +215,13 @@ function renderallinoneTable(data, columns) {
     thead.appendChild(headRow);
     // --- Table Body ---
     const tbody = document.createElement("tbody");
+    const tr = document.createElement("tr");
     data.forEach(row => {
-        const tr = document.createElement("tr");
-        columns.forEach(col => {
-            const td = document.createElement("td");
-            td.textContent = row[col] !== null ? row[col] : "";
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
+        const td = document.createElement("td");
+        td.textContent = row !== null ? row : "";
+        tr.appendChild(td);
     });
+    tbody.appendChild(tr);
 
     table.appendChild(thead);
     table.appendChild(tbody);
@@ -206,7 +232,7 @@ async function startExport() {
   showLoader();
 
   try {
-    const res = await fetch("/export_excel_zone03", {
+    const res = await fetch("/export_excel_allinone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(f)

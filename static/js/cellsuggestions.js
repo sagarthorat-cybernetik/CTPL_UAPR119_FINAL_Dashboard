@@ -198,7 +198,7 @@ function createHistogramChart(canvasId, binEdges, hist, title, unit, type) {
         data: {
             labels: labels,
             datasets: [{
-                label: `Cell Count (${unit})`,
+                label: `Cell Count`,
                 data: hist,
                 borderWidth: 1
             }]
