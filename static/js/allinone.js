@@ -100,17 +100,21 @@ async function loadPage(page = 1) {
   }
 }
 
-async function getallinonedata(fgid) {
+async function getallinonedata(sfgid, module01_id , module02_id) {
+    console.log(sfgid)
+    console.log(module01_id)
+    console.log(module02_id)
   showLoader();
   try {
     const res = await fetch("/fetch_allinone_data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fg_id: fgid })
+      body: JSON.stringify({ sfg_id: sfgid, module01_id: module01_id, module02_id: module02_id })
     });
     if (!res.ok) throw new Error("Failed to fetch all-in-one data");
     const result = await res.json();
     if (result.error) throw new Error(result.error);
+    console.log(result.data)
     renderallinoneTable(result.data || [], result.columns || []);
   } catch (err) {
     console.error("Error loading all-in-one data:", err);
@@ -148,8 +152,10 @@ function renderTable(data, columns) {
     });
     thead.appendChild(headRow);
     // call the rendering for all-in-one table for first row data only
-    const fgid = data[0]["FGID"];
-    getallinonedata(fgid);
+    const sfgid = data[0]["SFGNumber"];
+    const module01_id = data[0]["Module01_ID"]
+    const module02_id = data[0]["Module02_ID"]
+    getallinonedata(sfgid, module01_id ,module02_id);
     // --- Table Body ---
     const tbody = document.createElement("tbody");
     data.forEach(row => {

@@ -2480,20 +2480,24 @@ def fetch_allinone_data():
         # BARCODE FILTER
         # ---------------------------
         barcode_conditions = []
+        acir_barcode_conditions = []
         params = {}
 
         if sfg:
             barcode_conditions.append("M.Pallet_Identification_Barcode = :sfg")
+            acir_barcode_conditions.append("ModuleBarcodeData = :sfg")
             params["sfg"] = sfg
         if m1:
             barcode_conditions.append("M.Pallet_Identification_Barcode = :m1")
+            acir_barcode_conditions.append("ModuleBarcodeData = :m1")
             params["m1"] = m1
         if m2:
             barcode_conditions.append("M.Pallet_Identification_Barcode = :m2")
+            acir_barcode_conditions.append("ModuleBarcodeData = :m2")
             params["m2"] = m2
 
         where_sql = " OR ".join(barcode_conditions)
-
+        acir_where_sql = " OR ".join(acir_barcode_conditions)
         # ==========================================================
         # MODULE FORMATION + CELL DATA
         # ==========================================================
@@ -2542,11 +2546,12 @@ def fetch_allinone_data():
         ORDER BY MC.Date_Time DESC, MC.Position
         """)
 
-        with engine_zone01.connect() as conn:
+        with engine.connect() as conn:
             module_rows = conn.execute(module_sql, params).mappings().all()
 
         if not module_rows:
-            return jsonify({"columns": [], "data": [], "limit": 0})
+            # return jsonify({"columns": [], "data": [], "limit": 0})
+            module_rows = []
 
         # ---------------------------
         # GROUP BY MODULE
@@ -2579,17 +2584,17 @@ def fetch_allinone_data():
         # ==========================================================
         # ACIR DATA
         # ==========================================================
-        acir_sql = text("""
+        acir_sql = text(f"""
         SELECT *
         FROM ZONE02_REPORTS.dbo.ACIR_Testing_Station
-        WHERE ModuleBarcodeData IN :barcodes
+        WHERE {acir_where_sql}
         """)
 
         barcodes = tuple(combined.keys())
 
         with engine_zone02.connect() as conn:
             acir_rows = conn.execute(
-                acir_sql, {"barcodes": barcodes}
+                acir_sql, params
             ).mappings().all()
 
         for r in acir_rows:
