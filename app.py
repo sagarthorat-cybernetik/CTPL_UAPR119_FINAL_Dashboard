@@ -371,6 +371,7 @@ def api_cell_dashboard():
             "total_pages": (int(total) + page_size - 1) // page_size
         })
     except Exception as e:
+        print(f"error getting cell data {e}")
         return jsonify({"error": f"Query failed: {e}"}), 500
 
 
@@ -463,7 +464,8 @@ def handle_fetch_module_data():
                    M.CapacityMinimum,
                    M.CapacityMaximum,
                    M.CapacityName,
-                   M.StoredStatus AS Status
+                   M.StoredStatus AS Status,
+                   M.CycleTime
                FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                CROSS APPLY (VALUES
                    (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
@@ -511,6 +513,7 @@ def handle_fetch_module_data():
                CAST(MC.CapacityMinimum AS VARCHAR(20)) + '-' + CAST(MC.CapacityMaximum AS VARCHAR(20)) AS Module_Capacity_Range,
                MC.CapacityName AS Module_Capacity_Name,
                MC.Status,
+               MC.CycleTime,
                CAST(MA.Min_Capacity AS VARCHAR(20)) AS Module_Capacity_Min,
                 CAST(MA.Max_Capacity AS VARCHAR(20)) AS Module_Capacity_Max,
                 CAST(MA.Min_Voltage AS VARCHAR(20)) AS Module_Voltage_Min,
