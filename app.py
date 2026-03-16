@@ -921,9 +921,9 @@ def export_module(task_id, args):
                         PARTITION BY CR.Cell_Barcode
                         ORDER BY 
                             CASE 
-                                WHEN CR.Cell_Capacity_Actual = 9999.0 THEN 1 
+                                WHEN CR.Cell_Capacity_Actual = 999999 THEN 1 
                                 ELSE 0 
-                            END,              -- prefer non-9999
+                            END,              -- prefer non-999999
                             CR.Date_Time DESC -- then latest
                     ) AS rn
                FROM ZONE01_REPORTS.dbo.Cell_Report CR
@@ -940,7 +940,8 @@ def export_module(task_id, args):
                    M.CapacityMinimum,
                    M.CapacityMaximum,
                    M.CapacityName,
-                   M.StoredStatus AS Status
+                   M.StoredStatus AS Status,
+                   M.CycleTime
                FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                CROSS APPLY (VALUES
                    (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
@@ -968,7 +969,6 @@ def export_module(task_id, args):
                    MAX(L.Cell_Voltage_Actual) AS Max_Voltage,
                    MIN(L.Cell_Resistance_Actual) AS Min_Resistance,
                    MAX(L.Cell_Resistance_Actual) AS Max_Resistance
-                   
                FROM ModuleCells MC
                LEFT JOIN LatestCell L
                    ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
@@ -989,18 +989,13 @@ def export_module(task_id, args):
                CAST(MC.CapacityMinimum AS VARCHAR(20)) + '-' + CAST(MC.CapacityMaximum AS VARCHAR(20)) AS Module_Capacity_Range,
                MC.CapacityName AS Module_Capacity_Name,
                MC.Status,
+               MC.CycleTime,
                CAST(MA.Min_Capacity AS VARCHAR(20)) AS Module_Capacity_Min,
                 CAST(MA.Max_Capacity AS VARCHAR(20)) AS Module_Capacity_Max,
                 CAST(MA.Min_Voltage AS VARCHAR(20)) AS Module_Voltage_Min,
                 CAST(MA.Max_Voltage AS VARCHAR(20)) AS Module_Voltage_Max,
                 CAST(MA.Min_Resistance AS VARCHAR(20)) AS Module_Resistance_Min,
-                CAST(MA.Max_Resistance AS VARCHAR(20)) AS Module_Resistance_Max,
-       -- ✅ Added Difference Columns in correct location
-        CAST(ISNULL(MA.Max_Capacity, 0) - ISNULL(MA.Min_Capacity, 0) AS VARCHAR(20)) AS Module_Capacity_Difference,
-        CAST((ISNULL(MA.Max_Voltage, 0) - ISNULL(MA.Min_Voltage, 0)) * 1000 AS VARCHAR(20)) AS Module_Voltage_Difference,
-        CAST(ISNULL(MA.Max_Resistance, 0) - ISNULL(MA.Min_Resistance, 0) AS VARCHAR(20)) AS Module_Resistance_Difference
-
-
+                CAST(MA.Max_Resistance AS VARCHAR(20)) AS Module_Resistance_Max
            FROM ModuleCells MC
            LEFT JOIN LatestCell L
                ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
@@ -4325,4 +4320,4 @@ def export_excel_allinone_download():
 if __name__ == "__main__":
     # For development only. Use gunicorn in production:
     # gunicorn -w 4 -b 0.0.0.0:5000 app:app
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)
