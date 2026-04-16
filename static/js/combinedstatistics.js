@@ -115,6 +115,7 @@ async function getStatistics() {
 
 function displayZone1Stats(data) {
     try{
+        console.log(data);
         // Display cell stats
         document.getElementById('z1TotalCells').textContent = data.cells.total.toLocaleString();
         document.getElementById('z1OkCells').textContent = data.cells.ok.toLocaleString();
@@ -125,6 +126,7 @@ function displayZone1Stats(data) {
         document.getElementById('z1OkModules').textContent = data.modules.ok.toLocaleString();
         document.getElementById('z1NgModules').textContent = data.modules.ng.toLocaleString();
         document.getElementById('z1InProgressModules').textContent = data.modules.inprogress.toLocaleString();
+        document.getElementById('z1avgCycletimeModule').textContent = data.modules.avgcytime.toLocaleString();
 
         // Show zone 1 content
         document.getElementById('zone1Content').style.display = 'block';

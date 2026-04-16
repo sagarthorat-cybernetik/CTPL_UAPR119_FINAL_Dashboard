@@ -331,6 +331,9 @@ function zone03dashboard() {
 function combinedstatistics() {
   window.location = "/combinedstatistics";
 }
+function zone01_ole_oee(){
+window.location = "/zone01_ole_oee";
+}
 document.addEventListener("DOMContentLoaded", () => {
   setDefaultDates();
   attachUI();

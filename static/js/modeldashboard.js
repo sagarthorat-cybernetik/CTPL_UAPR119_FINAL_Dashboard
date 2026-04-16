@@ -142,6 +142,7 @@ function renderTable(rows) {
         <td>${(row.Module_Resistance_Max - row.Module_Resistance_Min).toFixed(4)  ?? "-"}</td>
         <td>${row.Module_Capacity_Range ?? "-"}</td>
         <td>${row.Module_Capacity_Name ?? "-"}</td>
+        <td>${(row.CycleTime).toFixed(4) ?? "-"}</td>
         <td>${row.Status ?? "-"}</td>
       `;
       frag.appendChild(tr);

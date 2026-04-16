@@ -194,6 +194,22 @@ def combinedstatistics():
 @login_required
 def allinonedashboard():
     return render_template("allinonedashboard.html")
+
+@app.route("/zone01_ole_oee")
+@login_required
+def zone01_ole_oee():
+    return render_template("zone01_OLE_OEE.html")
+
+@app.route("/zone02_ole_oee")
+@login_required
+def zone02_ole_oee():
+    return render_template("zone02_OLE_OEE.html")
+
+@app.route("/zone03_ole_oee")
+@login_required
+def zone03_ole_oee():
+    return render_template("zone03_OLE_OEE.html")
+
 # -----------------------
 # Login Route
 # -----------------------
@@ -371,6 +387,7 @@ def api_cell_dashboard():
             "total_pages": (int(total) + page_size - 1) // page_size
         })
     except Exception as e:
+        print(f"error getting cell data {e}")
         return jsonify({"error": f"Query failed: {e}"}), 500
 
 
@@ -463,7 +480,8 @@ def handle_fetch_module_data():
                    M.CapacityMinimum,
                    M.CapacityMaximum,
                    M.CapacityName,
-                   M.StoredStatus AS Status
+                   M.StoredStatus AS Status,
+                   M.CycleTime
                FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                CROSS APPLY (VALUES
                    (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
@@ -511,6 +529,7 @@ def handle_fetch_module_data():
                CAST(MC.CapacityMinimum AS VARCHAR(20)) + '-' + CAST(MC.CapacityMaximum AS VARCHAR(20)) AS Module_Capacity_Range,
                MC.CapacityName AS Module_Capacity_Name,
                MC.Status,
+               MC.CycleTime,
                CAST(MA.Min_Capacity AS VARCHAR(20)) AS Module_Capacity_Min,
                 CAST(MA.Max_Capacity AS VARCHAR(20)) AS Module_Capacity_Max,
                 CAST(MA.Min_Voltage AS VARCHAR(20)) AS Module_Voltage_Min,
@@ -918,9 +937,9 @@ def export_module(task_id, args):
                         PARTITION BY CR.Cell_Barcode
                         ORDER BY 
                             CASE 
-                                WHEN CR.Cell_Capacity_Actual = 9999.0 THEN 1 
+                                WHEN CR.Cell_Capacity_Actual = 999999 THEN 1 
                                 ELSE 0 
-                            END,              -- prefer non-9999
+                            END,              -- prefer non-999999
                             CR.Date_Time DESC -- then latest
                     ) AS rn
                FROM ZONE01_REPORTS.dbo.Cell_Report CR
@@ -937,7 +956,8 @@ def export_module(task_id, args):
                    M.CapacityMinimum,
                    M.CapacityMaximum,
                    M.CapacityName,
-                   M.StoredStatus AS Status
+                   M.StoredStatus AS Status,
+                   M.CycleTime
                FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                CROSS APPLY (VALUES
                    (M.Barcode01),(M.Barcode02),(M.Barcode03),(M.Barcode04),
@@ -965,7 +985,6 @@ def export_module(task_id, args):
                    MAX(L.Cell_Voltage_Actual) AS Max_Voltage,
                    MIN(L.Cell_Resistance_Actual) AS Min_Resistance,
                    MAX(L.Cell_Resistance_Actual) AS Max_Resistance
-                   
                FROM ModuleCells MC
                LEFT JOIN LatestCell L
                    ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
@@ -986,18 +1005,13 @@ def export_module(task_id, args):
                CAST(MC.CapacityMinimum AS VARCHAR(20)) + '-' + CAST(MC.CapacityMaximum AS VARCHAR(20)) AS Module_Capacity_Range,
                MC.CapacityName AS Module_Capacity_Name,
                MC.Status,
+               MC.CycleTime,
                CAST(MA.Min_Capacity AS VARCHAR(20)) AS Module_Capacity_Min,
                 CAST(MA.Max_Capacity AS VARCHAR(20)) AS Module_Capacity_Max,
                 CAST(MA.Min_Voltage AS VARCHAR(20)) AS Module_Voltage_Min,
                 CAST(MA.Max_Voltage AS VARCHAR(20)) AS Module_Voltage_Max,
                 CAST(MA.Min_Resistance AS VARCHAR(20)) AS Module_Resistance_Min,
-                CAST(MA.Max_Resistance AS VARCHAR(20)) AS Module_Resistance_Max,
-       -- ✅ Added Difference Columns in correct location
-        CAST(ISNULL(MA.Max_Capacity, 0) - ISNULL(MA.Min_Capacity, 0) AS VARCHAR(20)) AS Module_Capacity_Difference,
-        CAST((ISNULL(MA.Max_Voltage, 0) - ISNULL(MA.Min_Voltage, 0)) * 1000 AS VARCHAR(20)) AS Module_Voltage_Difference,
-        CAST(ISNULL(MA.Max_Resistance, 0) - ISNULL(MA.Min_Resistance, 0) AS VARCHAR(20)) AS Module_Resistance_Difference
-
-
+                CAST(MA.Max_Resistance AS VARCHAR(20)) AS Module_Resistance_Max
            FROM ModuleCells MC
            LEFT JOIN LatestCell L
                ON MC.Cell_ID = L.Cell_Barcode AND L.rn = 1
@@ -1766,6 +1780,549 @@ def export_excel_zone03():
         return jsonify({"error": f"Export failed: {e}"}), 500
 
 
+# === Paginated fetch with filters ===
+@app.route("/fetch_data_zone01_ole_oee", methods=["POST"])
+def fetch_data_zone01_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+        page = max(int(body.get("page", 1)), 1)
+        limit = min(int(body.get("limit", 100)), 1000)
+        offset = (page - 1) * limit
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+        # Paginated data query
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+
+        with engine.connect() as conn:
+            total = conn.execute(count_query, params).scalar()
+
+            # 🔹 get cursor description to preserve column order
+            result = conn.execute(query, {**params, "offset": offset, "limit": limit})
+            columns = result.keys()  # ordered list of columns
+            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        def format_datetime(value):
+            """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
+            # print(value)
+            if isinstance(value, datetime):
+                return value.strftime("%d %b %Y %H:%M:%S")
+            try:
+                # parsed = datetime.fromisoformat(str(value).replace("Z", ""))
+                return value.strftime("%d %b %Y %H:%M:%S")
+            except Exception:
+                return value  # leave unchanged if parsing fails
+
+        def format_float(value):
+            """Format value to 4 decimal places if it's a float or numeric string."""
+            try:
+                # Convert to float once
+                fval = float(value)
+
+                # Check if original was string and contained a decimal point
+
+                if (isinstance(value, str) or isinstance(value, float)) or "." in value:
+
+                    return f"{fval:.4f}"
+                else:
+                    return value  # leave ints or non-floats unchanged
+            except (ValueError, TypeError):
+                return value  # leave as is if not numeric
+
+        for row in rows:
+            for k, v in row.items():
+                if k.lower() == "datetime":
+                    row[k] = format_datetime(v)
+                elif isinstance(v, float):
+                    if v == 0.0:
+                        continue  # skip formatting 0.0
+                    if "status" in k.lower():
+                        continue  # skip status fields
+                    row[k] = format_float(v)
+
+        return jsonify({
+            "columns": list(columns),  # 👈 send ordered columns to UI
+            "data": rows,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        })
+
+    except Exception as e:
+        print("❌ SQL ERROR:", e)
+        return jsonify({"error": f"Query failed: {e}"}), 500
+
+
+# === Export full filtered data to Excel ===
+@app.route("/export_excel_zone01_ole_oee", methods=["POST"])
+def export_excel_zone01_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params=params)
+            dfcount = pd.read_sql(count_query, conn, params=params)
+        # Save Excel inside project exports/
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_station = station_table.replace(" ", "_")
+        filename = f"{safe_station}_{timestamp}.xlsx"
+
+        export_dir = os.path.join(app.root_path, "exports")
+        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+        filepath = os.path.join(export_dir, filename)
+
+        # filepath = os.path.join(export_dir, filename)
+        # df.to_excel(filepath, index=False)
+        # ---- Write Excel with stats on top ----
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count"],
+                "Value": [
+                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                ]
+            })
+            if stats_summary.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+
+        return send_file(filepath, as_attachment=True)
+
+        # return send_file(filepath, as_attachment=True)
+
+    except Exception as e:
+        print("❌ SQL ERROR (Excel):", e)
+        return jsonify({"error": f"Export failed: {e}"}), 500
+
+
+# === Paginated fetch with filters ===
+@app.route("/fetch_data_zone02_ole_oee", methods=["POST"])
+def fetch_data_zone02_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+        page = max(int(body.get("page", 1)), 1)
+        limit = min(int(body.get("limit", 100)), 1000)
+        offset = (page - 1) * limit
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime1] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+        # Paginated data query
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime1] DESC
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """)
+        # Total count
+
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+        # 3. COLUMN QUERY
+        # column_query = text("""
+        #     SELECT COLUMN_NAME
+        #     FROM INFORMATION_SCHEMA.COLUMNS
+        #     WHERE TABLE_NAME = :table_name
+        #     ORDER BY ORDINAL_POSITION
+        # """)
+
+        with engine_zone02.connect() as conn:
+            # Columns
+            # col_result = conn.execute(column_query, {"table_name": station_table})
+            # columns = [row[0] for row in col_result.fetchall()]
+            # print(columns)
+            total = conn.execute(count_query, params).scalar()
+            print(query)
+            # 🔹 get cursor description to preserve column order
+            result = conn.execute(query, {**params, "offset": offset, "limit": limit})
+            columns = result.keys()  # ordered list of columns
+            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        def format_datetime(value):
+            """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
+            # print(value)
+            if isinstance(value, datetime):
+                return value.strftime("%d %b %Y %H:%M:%S")
+            try:
+                # parsed = datetime.fromisoformat(str(value).replace("Z", ""))
+                return value.strftime("%d %b %Y %H:%M:%S")
+            except Exception:
+                return value  # leave unchanged if parsing fails
+
+        def format_float(value):
+            """Format value to 4 decimal places if it's a float or numeric string."""
+            try:
+                # Convert to float once
+                fval = float(value)
+
+                # Check if original was string and contained a decimal point
+
+                if (isinstance(value, str) or isinstance(value, float)) or "." in value:
+
+                    return f"{fval:.4f}"
+                else:
+                    return value  # leave ints or non-floats unchanged
+            except (ValueError, TypeError):
+                return value  # leave as is if not numeric
+
+        for row in rows:
+            for k, v in row.items():
+                if k.lower() == "datetime":
+                    row[k] = format_datetime(v)
+                elif isinstance(v, float):
+                    if v == 0.0:
+                        continue  # skip formatting 0.0
+                    if "status" in k.lower():
+                        continue  # skip status fields
+                    row[k] = format_float(v)
+
+        return jsonify({
+            "columns": list(columns),  # 👈 send ordered columns to UI
+            "data": rows,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        })
+
+    except Exception as e:
+        print("❌ SQL ERROR:", e)
+        return jsonify({"error": f"Query failed: {e}"}), 500
+
+
+# === Export full filtered data to Excel ===
+@app.route("/export_excel_zone02_ole_oee", methods=["POST"])
+def export_excel_zone02_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime1] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime1] DESC
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+        with engine_zone02.connect() as conn:
+            df = pd.read_sql(query, conn, params=params)
+            dfcount = pd.read_sql(count_query, conn, params=params)
+        # Save Excel inside project exports/
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_station = station_table.replace(" ", "_")
+        filename = f"{safe_station}_{timestamp}.xlsx"
+
+        export_dir = os.path.join(app.root_path, "exports")
+        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+        filepath = os.path.join(export_dir, filename)
+
+        # filepath = os.path.join(export_dir, filename)
+        # df.to_excel(filepath, index=False)
+        # ---- Write Excel with stats on top ----
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count"],
+                "Value": [
+                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                ]
+            })
+            if stats_summary.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+
+        return send_file(filepath, as_attachment=True)
+
+        # return send_file(filepath, as_attachment=True)
+
+    except Exception as e:
+        print("❌ SQL ERROR (Excel):", e)
+        return jsonify({"error": f"Export failed: {e}"}), 500
+
+
+# === Paginated fetch with filters ===
+@app.route("/fetch_data_zone03_ole_oee", methods=["POST"])
+def fetch_data_zone03_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+        page = max(int(body.get("page", 1)), 1)
+        limit = min(int(body.get("limit", 100)), 1000)
+        offset = (page - 1) * limit
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+        # Paginated data query
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+
+        with engine_zone03.connect() as conn:
+            total = conn.execute(count_query, params).scalar()
+
+            # 🔹 get cursor description to preserve column order
+            result = conn.execute(query, {**params, "offset": offset, "limit": limit})
+            columns = result.keys()  # ordered list of columns
+            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        def format_datetime(value):
+            """Format datetime to 'DD Mon YYYY HH:MM:SS'."""
+            # print(value)
+            if isinstance(value, datetime):
+                return value.strftime("%d %b %Y %H:%M:%S")
+            try:
+                # parsed = datetime.fromisoformat(str(value).replace("Z", ""))
+                return value.strftime("%d %b %Y %H:%M:%S")
+            except Exception:
+                return value  # leave unchanged if parsing fails
+
+        def format_float(value):
+            """Format value to 4 decimal places if it's a float or numeric string."""
+            try:
+                # Convert to float once
+                fval = float(value)
+
+                # Check if original was string and contained a decimal point
+
+                if (isinstance(value, str) or isinstance(value, float)) or "." in value:
+
+                    return f"{fval:.4f}"
+                else:
+                    return value  # leave ints or non-floats unchanged
+            except (ValueError, TypeError):
+                return value  # leave as is if not numeric
+
+        for row in rows:
+            for k, v in row.items():
+                if k.lower() == "datetime":
+                    row[k] = format_datetime(v)
+                elif isinstance(v, float):
+                    if v == 0.0:
+                        continue  # skip formatting 0.0
+                    if "status" in k.lower():
+                        continue  # skip status fields
+                    row[k] = format_float(v)
+
+        return jsonify({
+            "columns": list(columns),  # 👈 send ordered columns to UI
+            "data": rows,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        })
+
+    except Exception as e:
+        print("❌ SQL ERROR:", e)
+        return jsonify({"error": f"Query failed: {e}"}), 500
+
+
+# === Export full filtered data to Excel ===
+@app.route("/export_excel_zone03_ole_oee", methods=["POST"])
+def export_excel_zone03_ole_oee():
+    try:
+        body = request.get_json(force=True) or {}
+        station_table = body.get("station_name")  # 👈 Table name
+        start_date = parse_date(body.get("start_date"))
+        end_date = parse_date(body.get("end_date"))
+
+        if not station_table:
+            return jsonify({"error": "station_name (table) is required"}), 400
+
+        # Build filters
+        filters, params = [], {}
+        if start_date and end_date:
+            filters.append("[DateTime] BETWEEN :start AND :end")
+            params["start"] = start_date
+            params["end"] = end_date
+
+        where_clause = " AND ".join(filters) if filters else "1=1"
+
+        query = text(f"""
+            SELECT * FROM [{station_table}]
+            WHERE {where_clause}
+            ORDER BY [DateTime] DESC
+        """)
+        # Total count
+        count_query = text(f"""
+            SELECT COUNT(*) as total FROM [{station_table}]
+            WHERE {where_clause}
+        """)
+
+        with engine_zone03.connect() as conn:
+            df = pd.read_sql(query, conn, params=params)
+            dfcount = pd.read_sql(count_query, conn, params=params)
+        # Save Excel inside project exports/
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_station = station_table.replace(" ", "_")
+        filename = f"{safe_station}_{timestamp}.xlsx"
+
+        export_dir = os.path.join(app.root_path, "exports")
+        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+        filepath = os.path.join(export_dir, filename)
+
+        # filepath = os.path.join(export_dir, filename)
+        # df.to_excel(filepath, index=False)
+        # ---- Write Excel with stats on top ----
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            # 1) Write summary statistics at top
+            stats_summary = pd.DataFrame({
+                "Metric": ["Total Count"],
+                "Value": [
+                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                ]
+            })
+            if stats_summary.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+            else:
+                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+            # 2) Leave a gap then write the actual data
+            startrow = len(stats_summary) + 3  # 3-row gap
+            if df.empty:
+                # Write a placeholder message so at least one sheet is visible
+                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+            else:
+                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+
+        return send_file(filepath, as_attachment=True)
+
+        # return send_file(filepath, as_attachment=True)
+
+    except Exception as e:
+        print("❌ SQL ERROR (Excel):", e)
+        return jsonify({"error": f"Export failed: {e}"}), 500
+
+
 # -----------------------
 # Grade Suggestions API
 # -----------------------
@@ -1913,7 +2470,8 @@ def api_combined_statistics():
                       COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
                     SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
                     SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
-                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
+                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules,
+                    AVG(M.CycleTime) as avgcytime
                 FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                 WHERE Date_Time BETWEEN :start AND :end
                 """)
@@ -1931,7 +2489,8 @@ def api_combined_statistics():
                     "total": module_stats.get("total_modules", 0),
                     "ok": module_stats.get("ok_modules", 0),
                     "ng": module_stats.get("ng_modules", 0),
-                    "inprogress": module_stats.get("inprogress_modules", 0)
+                    "inprogress": module_stats.get("inprogress_modules", 0),
+                    "avgcytime":module_stats.get("avgcytime",0)
                 }
             })
 
@@ -4322,4 +4881,4 @@ def export_excel_allinone_download():
 if __name__ == "__main__":
     # For development only. Use gunicorn in production:
     # gunicorn -w 4 -b 0.0.0.0:5000 app:app
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)
