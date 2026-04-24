@@ -126,7 +126,11 @@ function renderTable(data, columns) {
     const headRow = document.createElement("tr");
     columns.forEach(col => {
         const th = document.createElement("th");
-        th.textContent = col;
+        if (col.includes("DateTime") || col.includes("Shift_User") || col.includes("OperationalShift")) {
+            th.textContent = col;
+        } else {
+            th.textContent = `${col}%`;
+        }
         headRow.appendChild(th);
     });
     thead.appendChild(headRow);

@@ -6,6 +6,8 @@ from uuid import uuid4
 import tempfile
 import os
 import csv
+
+from numpy.f2py.rules import module_rules
 from sqlalchemy import create_engine, text
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -1538,7 +1540,146 @@ def export_excel_zone02_download():
 # Dashboard API Zone 03 (stats + paginated rows in one call)
 # -----------------------
 
+def format_response(response_data, station_table):
+    """Helper function to format the response data"""
+    columns = response_data["columns"]
+    rows = response_data["data"]
 
+    def format_float(value):
+        """Format value to 2 decimal places for utilization data, 4 for others"""
+        try:
+            fval = float(value)
+            # For utilization percentages, show 2 decimal places
+            if "utilization" in str(value).lower() or "percentage" in str(value).lower():
+                return f"{fval:.2f}"
+            elif (isinstance(value, str) or isinstance(value, float)) and "." in str(value):
+                return f"{fval:.4f}"
+            else:
+                return value
+        except (ValueError, TypeError):
+            return value
+
+    def format_datetime(value):
+        """Format datetime to 'DD Mon YYYY HH:MM:SS'"""
+        if isinstance(value, datetime):
+            return value.strftime("%d %b %Y %H:%M:%S")
+        try:
+            return value.strftime("%d %b %Y %H:%M:%S")
+        except Exception:
+            return value
+
+    def format_time_hours(value):
+        """Format time in hours to readable format"""
+        try:
+            if value is None:
+                return "0"
+            hours = float(value)
+            if hours >= 1:
+                return f"{hours:.2f} hrs"
+            else:
+                minutes = hours * 60
+                return f"{minutes:.0f} min"
+        except (ValueError, TypeError):
+            return str(value)
+
+    for row in rows:
+        for k, v in row.items():
+            if k.lower() == "datetime" or "time" in k.lower():
+                if isinstance(v, datetime) or "time" in k.lower():
+                    if k.lower() != "actual_time" and k.lower() != "gap_with_last_cycle":
+                        row[k] = format_datetime(v)
+
+            # Format status for non-utilization tables
+            if "status" in k.lower() and station_table != "Packtester_Utilazation":
+                if str(row[k]) == "0" or str(row[k]) == "2":
+                    row[k] = "NG"
+                else:
+                    row[k] = "OK"
+
+            # Format time values
+            elif k.lower() == "actual_time" or k.lower() == "gap_with_last_cycle":
+                if v is not None:
+                    # Convert seconds to readable format
+                    seconds = float(v) if isinstance(v, (int, float)) else 0
+                    if seconds >= 3600:
+                        row[k] = f"{seconds / 3600:.2f} hrs"
+                    elif seconds >= 60:
+                        row[k] = f"{seconds / 60:.1f} min"
+                    else:
+                        row[k] = f"{seconds:.0f} sec"
+
+            # Format float values
+            elif isinstance(v, float):
+                if v == 0.0:
+                    continue
+                if "status" in k.lower():
+                    continue
+                row[k] = format_float(v)
+
+    # Special transformation for ACIR_Testing_Station
+    if station_table == "ACIR_Testing_Station":
+        transformed_rows = []
+        for row in rows:
+            transformed_rows.append({
+                "DateTime": row["DateTime"],
+                "Shift": row["Shift"],
+                "Operator": row["Operator"],
+                "ModuleBarcodeData": row["ModuleBarcodeData"],
+                "Position": list(range(1, 17)),
+                "Voltage": [row.get(f"String_{i}_Voltage") for i in range(1, 17)],
+                "Resistance": [row.get(f"String_{i}_Resistance") for i in range(1, 17)],
+                "FinalVoltage1": row["Pack_Level_Voltage"],
+                "FinalResistance1": row["Pack_Level_Resistance"],
+                "FinalVoltage2": row["Pack_Level_Voltage_Module02"],
+                "FinalResistance2": row["Pack_Level_Resistance_Module02"],
+                "IR_Diff_String_Level_Max": row["IR_Diff_String_Level_Max"],
+                "IR_Diff_String_Level_Min": row["IR_Diff_String_Level_Min"],
+                "V_Diff_String_Level_Max": row["V_Diff_String_Level_Max"],
+                "V_Diff_String_Level_Min": row["V_Diff_String_Level_Min"],
+                "String_IR_Max": row["String_IR_Max"],
+                "String_IR_Min": row["String_IR_Min"],
+                "String_Voltage_Min": row["String_Voltage_Min"],
+                "String_Voltage_Max": row["String_Voltage_Max"],
+                "Pack_Level_Resistance_Min": row["Pack_Level_Resistance_Min"],
+                "Pack_Level_Resistance_Max": row["Pack_Level_Resistance_Max"],
+                "Pack_Level_Voltage_Min": row["Pack_Level_Voltage_Min"],
+                "Pack_Level_Voltage_Max": row["Pack_Level_Voltage_Max"],
+                "Module_Level_IR_Diff_Max": row["Module_Level_IR_Diff_Max"],
+                "Module_Level_IR_Diff_Min": row["Module_Level_IR_Diff_Min"],
+                "Pack_Level_Resistance": row["Pack_Level_Resistance"],
+                "Pack_Level_Voltage": row["Pack_Level_Voltage"],
+                "Pack_Level_Resistance_Module02": row["Pack_Level_Resistance_Module02"],
+                "Pack_Level_Voltage_Module02": row["Pack_Level_Voltage_Module02"],
+                "String_Level_IR_Diff_Max_Min": row["String_Level_IR_Diff_Max_Min"],
+                "String_Level_V_Diff_Max_Min": row["String_Level_V_Diff_Max_Min"],
+                "Module_Level_Resistance": row["Module_Level_Resistance"],
+                "Status": row.get("Status"),
+                "CycleTime": format_time_hours(row.get("CycleTime"))
+            })
+
+        response_data["columns"] = [
+            "DateTime", "Shift", "Operator", "ModuleBarcodeData",
+            "Position", "Voltage", "Resistance",
+            "IR_Diff_String_Level_Max", "IR_Diff_String_Level_Min",
+            "V_Diff_String_Level_Max", "V_Diff_String_Level_Min",
+            "String_IR_Max", "String_IR_Min", "String_Voltage_Min", "String_Voltage_Max",
+            "Pack_Level_Resistance_Min", "Pack_Level_Resistance_Max",
+            "Pack_Level_Voltage_Min", "Pack_Level_Voltage_Max",
+            "Module_Level_IR_Diff_Max", "Module_Level_IR_Diff_Min",
+            "Pack_Level_Resistance", "Pack_Level_Voltage",
+            "Pack_Level_Resistance_Module02", "Pack_Level_Voltage_Module02",
+            "String_Level_IR_Diff_Max_Min", "String_Level_V_Diff_Max_Min",
+            "Module_Level_Resistance", "Status", "CycleTime"
+        ]
+        response_data["data"] = transformed_rows
+
+    # Remove columns from response if needed
+    if "columns" in response_data:
+        return_data = {k: v for k, v in response_data.items()}
+    else:
+        return_data = response_data
+
+    return jsonify(return_data)
 # === Paginated fetch with filters ===
 @app.route("/fetch_data_zone03", methods=["POST"])
 def fetch_data_zone03():
@@ -1583,6 +1724,189 @@ def fetch_data_zone03():
             params["shift"] = shift
 
         where_clause = " AND ".join(filters) if filters else "1=1"
+        # Special handling for Packtester_Utilazation table
+        if station_table == "Packtester_Utilazation":
+            with engine_zone03.connect() as conn:
+                # Query with Gap_With_Last_Cycle calculated on-the-fly
+                query_with_gap = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            [DateTime],
+                            Serial_Number,
+                            Machine_No,
+                            Channel_No,
+                            Testing_Type,
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    )
+                    SELECT 
+                        [DateTime],
+                        Serial_Number,
+                        Machine_No,
+                        Channel_No,
+                        Testing_Type,
+                        Start_Time,
+                        End_Time,
+                        Actual_Time,
+                        CASE 
+                            WHEN Prev_End_Time IS NULL THEN 0
+                            ELSE DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                        END AS Gap_With_Last_Cycle
+                    FROM RankedData
+                    WHERE Start_Time IS NOT NULL  -- Filter out invalid dates
+                    ORDER BY Machine_No, Channel_No, Start_Time DESC
+                    OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+                """)
+
+                # Count query for total records
+                count_query = text(f"""
+                    SELECT COUNT(*) as total FROM [Packtester_Utilazation]
+                    WHERE {where_clause}
+                """)
+
+                total = conn.execute(count_query, params).scalar()
+
+                # For utilization table, there's no Status column, so set OK/NG counts to None or 0
+                total_ok = None
+                total_ng = None
+
+                # Get utilization statistics for the filtered date range
+                utilization_stats_query = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            Machine_No,
+                            Channel_No,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    ),
+                    DailyChannelData AS (
+                        SELECT 
+                            CAST(Start_Time AS DATE) as Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            SUM(Actual_Time) / 3600.0 as Running_Time_Hours,
+                            COUNT(*) as Total_Cycles,
+                            SUM(CASE 
+                                WHEN Prev_End_Time IS NOT NULL 
+                                THEN DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                                ELSE 0 
+                            END) / 3600.0 as Idle_Time_Hours
+                        FROM RankedData
+                        WHERE Start_Time IS NOT NULL AND Actual_Time IS NOT NULL
+                        GROUP BY CAST(Start_Time AS DATE), Machine_No, Channel_No
+                    )
+                    SELECT 
+                        Test_Date,
+                        Machine_No,
+                        Channel_No,
+                        ROUND(Running_Time_Hours, 2) as Running_Time_Hours,
+                        ROUND(Idle_Time_Hours, 2) as Idle_Time_Hours,
+                        ROUND(Running_Time_Hours + Idle_Time_Hours, 2) as Total_Available_Time_Hours,
+                        CASE 
+                            WHEN (Running_Time_Hours + Idle_Time_Hours) > 0 
+                            THEN ROUND((Running_Time_Hours / (Running_Time_Hours + Idle_Time_Hours)) * 100, 2)
+                            ELSE 0
+                        END as Channel_Utilization_Percentage
+                    FROM DailyChannelData
+                    ORDER BY Test_Date DESC, Machine_No, Channel_No
+                """)
+
+                # Also get machine-level utilization (average of all channels for that machine)
+                machine_utilization_query = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            Machine_No,
+                            Channel_No,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    ),
+                    DailyChannelData AS (
+                        SELECT 
+                            CAST(Start_Time AS DATE) as Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            SUM(Actual_Time) / 3600.0 as Running_Time_Hours,
+                            SUM(CASE 
+                                WHEN Prev_End_Time IS NOT NULL 
+                                THEN DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                                ELSE 0 
+                            END) / 3600.0 as Idle_Time_Hours
+                        FROM RankedData
+                        WHERE Start_Time IS NOT NULL AND Actual_Time IS NOT NULL
+                        GROUP BY CAST(Start_Time AS DATE), Machine_No, Channel_No
+                    ),
+                    ChannelUtilization AS (
+                        SELECT 
+                            Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            Running_Time_Hours,
+                            Idle_Time_Hours,
+                            CASE 
+                                WHEN (Running_Time_Hours + Idle_Time_Hours) > 0 
+                                THEN (Running_Time_Hours / (Running_Time_Hours + Idle_Time_Hours)) * 100
+                                ELSE 0
+                            END as Channel_Utilization
+                        FROM DailyChannelData
+                    )
+                    SELECT 
+                        Test_Date,
+                        Machine_No,
+                        COUNT(DISTINCT Channel_No) as Total_Channels,
+                        ROUND(AVG(Channel_Utilization), 2) as Machine_Utilization_Percentage,
+                        ROUND(SUM(Running_Time_Hours), 2) as Total_Running_Time_Hours,
+                        ROUND(SUM(Idle_Time_Hours), 2) as Total_Idle_Time_Hours
+                    FROM ChannelUtilization
+                    GROUP BY Test_Date, Machine_No
+                    ORDER BY Test_Date DESC, Machine_No
+                """)
+
+                channel_stats = conn.execute(utilization_stats_query, params).mappings().fetchall()
+                machine_stats = conn.execute(machine_utilization_query, params).mappings().fetchall()
+
+                # Get paginated data
+                result = conn.execute(query_with_gap, {**params, "offset": offset, "limit": limit})
+                columns = result.keys()
+                rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+                response_data = {
+                    "columns": list(columns),
+                    "data": rows,
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "total_ok": total_ok,
+                    "total_ng": total_ng,
+                    "pages": (total + limit - 1) // limit,
+                    "utilization_stats": {
+                        "channel_stats": [dict(stat) for stat in channel_stats],
+                        "machine_stats": [dict(stat) for stat in machine_stats]
+                    }
+                }
+
+                # Format the response
+                return format_response(response_data, station_table)
         # Paginated data query
         query = text(f"""
             SELECT * FROM [{station_table}]
@@ -1677,13 +2001,117 @@ def fetch_data_zone03():
 
 # === Export full filtered data to Excel ===
 @app.route("/export_excel_zone03", methods=["POST"])
+# def export_excel_zone03():
+#     try:
+#         body = request.get_json(force=True) or {}
+#         station_table = body.get("station_name")  # 👈 Table name
+#         barcode = body.get("barcode")
+#         start_date = parse_date(body.get("start_date"))
+#         end_date = parse_date(body.get("end_date"))
+#
+#         if not station_table:
+#             return jsonify({"error": "station_name (table) is required"}), 400
+#
+#         # Build filters
+#         filters, params = [], {}
+#         if start_date and end_date:
+#             filters.append("[DateTime] BETWEEN :start AND :end")
+#             params["start"] = start_date
+#             params["end"] = end_date
+#         if barcode and (station_table == "BMS_Conn_Stn" or station_table == "BotmPlate_Tight_Stn" or station_table == "SFGBarcodeData"):
+#             filters.append("SFGBarcodeData = :barcode")
+#             params["barcode"] = barcode
+#         elif barcode and (station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn"  or station_table == "RoutinGlueingSt"):
+#             filters.append("FGBarcodeData = :barcode")
+#             params["barcode"] = barcode
+#         elif barcode and station_table == "Weighing_Station":
+#             filters.append("FGBarcode_Data = :barcode")
+#             params["barcode"] = barcode
+#
+#         elif barcode:
+#             filters.append("ModuleBarcodeData = :barcode")
+#             params["barcode"] = barcode
+#
+#         where_clause = " AND ".join(filters) if filters else "1=1"
+#
+#         query = text(f"""
+#             SELECT * FROM [{station_table}]
+#             WHERE {where_clause}
+#             ORDER BY [DateTime] DESC
+#         """)
+#         # Total count
+#         count_query = text(f"""
+#             SELECT COUNT(*) as total FROM [{station_table}]
+#             WHERE {where_clause}
+#         """)
+#         # Status counts
+#         status_query = text(f"""
+#             SELECT
+#                 SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+#                 SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
+#             FROM [{station_table}]
+#             WHERE {where_clause}
+#         """)
+#
+#         with engine_zone03.connect() as conn:
+#             df = pd.read_sql(query, conn, params=params)
+#             dfcount = pd.read_sql(count_query, conn, params=params)
+#             dfstats = pd.read_sql(status_query, conn, params=params)
+#         # Save Excel inside project exports/
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         safe_station = station_table.replace(" ", "_")
+#         filename = f"{safe_station}_{timestamp}.xlsx"
+#
+#         export_dir = os.path.join(app.root_path, "exports")
+#         os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+#         filepath = os.path.join(export_dir, filename)
+#
+#         # filepath = os.path.join(export_dir, filename)
+#         # df.to_excel(filepath, index=False)
+#         # ---- Write Excel with stats on top ----
+#         with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+#             # 1) Write summary statistics at top
+#             stats_summary = pd.DataFrame({
+#                 "Metric": ["Total Count", "Total OK", "Total NG"],
+#                 "Value": [
+#                     int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+#                     int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
+#                     int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
+#                 ]
+#             })
+#             if stats_summary.empty:
+#                 # Write a placeholder message so at least one sheet is visible
+#                 placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+#                 placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+#             else:
+#                 stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+#
+#             # 2) Leave a gap then write the actual data
+#             startrow = len(stats_summary) + 3  # 3-row gap
+#             if df.empty:
+#                 # Write a placeholder message so at least one sheet is visible
+#                 placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+#                 placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+#             else:
+#                 df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+#
+#         return send_file(filepath, as_attachment=True)
+#
+#         # return send_file(filepath, as_attachment=True)
+#
+#     except Exception as e:
+#         print("❌ SQL ERROR (Excel):", e)
+#         return jsonify({"error": f"Export failed: {e}"}), 500
+# === Export full filtered data to Excel with multiple sheets for utilization ===
+@app.route("/export_excel_zone03", methods=["POST"])
 def export_excel_zone03():
     try:
         body = request.get_json(force=True) or {}
-        station_table = body.get("station_name")  # 👈 Table name
+        station_table = body.get("station_name")
         barcode = body.get("barcode")
         start_date = parse_date(body.get("start_date"))
         end_date = parse_date(body.get("end_date"))
+        shift = body.get("shift")
 
         if not station_table:
             return jsonify({"error": "station_name (table) is required"}), 400
@@ -1694,91 +2122,311 @@ def export_excel_zone03():
             filters.append("[DateTime] BETWEEN :start AND :end")
             params["start"] = start_date
             params["end"] = end_date
-        if barcode and (station_table == "BMS_Conn_Stn" or station_table == "BotmPlate_Tight_Stn" or station_table == "SFGBarcodeData"):
+        if barcode and (
+                station_table == "BMS_Conn_Stn" or station_table == "BotmPlate_Tight_Stn" or station_table == "SFGBarcodeData"):
             filters.append("SFGBarcodeData = :barcode")
             params["barcode"] = barcode
-        elif barcode and (station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn"  or station_table == "RoutinGlueingSt"):
+        elif barcode and (
+                station_table == "Laser_Mark_Stn" or station_table == "Leak_Test_Stn" or station_table == "Top_Cover_Close_Stn" or station_table == "TopCover_Attach_Stn" or station_table == "RoutinGlueingSt"):
             filters.append("FGBarcodeData = :barcode")
             params["barcode"] = barcode
         elif barcode and station_table == "Weighing_Station":
             filters.append("FGBarcode_Data = :barcode")
             params["barcode"] = barcode
-
         elif barcode:
             filters.append("ModuleBarcodeData = :barcode")
             params["barcode"] = barcode
 
+        if shift and station_table == "Weighing_Station":
+            filters.append("Oprational_Shift = :shift")
+            params["shift"] = shift
+        elif shift:
+            filters.append("OperationalShift = :shift")
+            params["shift"] = shift
+
         where_clause = " AND ".join(filters) if filters else "1=1"
 
-        query = text(f"""
-            SELECT * FROM [{station_table}]
-            WHERE {where_clause}
-            ORDER BY [DateTime] DESC
-        """)
-        # Total count
-        count_query = text(f"""
-            SELECT COUNT(*) as total FROM [{station_table}]
-            WHERE {where_clause}
-        """)
-        # Status counts
-        status_query = text(f"""
-            SELECT 
-                SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
-                SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
-            FROM [{station_table}]
-            WHERE {where_clause}
-        """)
-
-        with engine_zone03.connect() as conn:
-            df = pd.read_sql(query, conn, params=params)
-            dfcount = pd.read_sql(count_query, conn, params=params)
-            dfstats = pd.read_sql(status_query, conn, params=params)
-        # Save Excel inside project exports/
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_station = station_table.replace(" ", "_")
         filename = f"{safe_station}_{timestamp}.xlsx"
-
         export_dir = os.path.join(app.root_path, "exports")
-        os.makedirs(export_dir, exist_ok=True)  # ✅ ensure folder exists
+        os.makedirs(export_dir, exist_ok=True)
         filepath = os.path.join(export_dir, filename)
 
-        # filepath = os.path.join(export_dir, filename)
-        # df.to_excel(filepath, index=False)
-        # ---- Write Excel with stats on top ----
-        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
-            # 1) Write summary statistics at top
-            stats_summary = pd.DataFrame({
-                "Metric": ["Total Count", "Total OK", "Total NG"],
-                "Value": [
-                    int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
-                    int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
-                    int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
-                ]
-            })
-            if stats_summary.empty:
-                # Write a placeholder message so at least one sheet is visible
-                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
-                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
-            else:
-                stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+        # Special handling for Packtester_Utilazation table
+        if station_table == "Packtester_Utilazation":
+            with engine_zone03.connect() as conn:
+                # Query for detailed data with Gap_With_Last_Cycle
+                query_with_gap = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            [DateTime],
+                            Serial_Number,
+                            Machine_No,
+                            Channel_No,
+                            Testing_Type,
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    )
+                    SELECT 
+                        [DateTime],
+                        Serial_Number,
+                        Machine_No,
+                        Channel_No,
+                        Testing_Type,
+                        Start_Time,
+                        End_Time,
+                        Actual_Time,
+                        CASE 
+                            WHEN Prev_End_Time IS NULL THEN 0
+                            ELSE DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                        END AS Gap_With_Last_Cycle
+                    FROM RankedData
+                    WHERE Start_Time IS NOT NULL
+                    ORDER BY Machine_No, Channel_No, Start_Time DESC
+                """)
 
-            # 2) Leave a gap then write the actual data
-            startrow = len(stats_summary) + 3  # 3-row gap
-            if df.empty:
-                # Write a placeholder message so at least one sheet is visible
-                placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
-                placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
-            else:
-                df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+                # Count query
+                count_query = text(f"""
+                    SELECT COUNT(*) as total FROM [Packtester_Utilazation]
+                    WHERE {where_clause}
+                """)
 
-        return send_file(filepath, as_attachment=True)
+                # Channel utilization statistics
+                utilization_stats_query = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            Machine_No,
+                            Channel_No,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    ),
+                    DailyChannelData AS (
+                        SELECT 
+                            CAST(Start_Time AS DATE) as Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            SUM(Actual_Time) / 3600.0 as Running_Time_Hours,
+                            COUNT(*) as Total_Cycles,
+                            SUM(CASE 
+                                WHEN Prev_End_Time IS NOT NULL 
+                                THEN DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                                ELSE 0 
+                            END) / 3600.0 as Idle_Time_Hours
+                        FROM RankedData
+                        WHERE Start_Time IS NOT NULL AND Actual_Time IS NOT NULL
+                        GROUP BY CAST(Start_Time AS DATE), Machine_No, Channel_No
+                    )
+                    SELECT 
+                        CONVERT(VARCHAR, Test_Date, 23) as Test_Date,
+                        Machine_No,
+                        Channel_No,
+                        ROUND(Running_Time_Hours, 2) as Running_Time_Hours,
+                        ROUND(Idle_Time_Hours, 2) as Idle_Time_Hours,
+                        ROUND(Running_Time_Hours + Idle_Time_Hours, 2) as Total_Available_Time_Hours,
+                        ROUND(Total_Cycles, 0) as Total_Cycles,
+                        CASE 
+                            WHEN (Running_Time_Hours + Idle_Time_Hours) > 0 
+                            THEN ROUND((Running_Time_Hours / (Running_Time_Hours + Idle_Time_Hours)) * 100, 2)
+                            ELSE 0
+                        END as Channel_Utilization_Percentage
+                    FROM DailyChannelData
+                    ORDER BY Test_Date DESC, Machine_No, Channel_No
+                """)
 
-        # return send_file(filepath, as_attachment=True)
+                # Machine utilization statistics
+                machine_utilization_query = text(f"""
+                    WITH RankedData AS (
+                        SELECT 
+                            TRY_CONVERT(DATETIME, Start_Time) as Start_Time,
+                            TRY_CONVERT(DATETIME, End_Time) as End_Time,
+                            TRY_CONVERT(FLOAT, Actual_Time) as Actual_Time,
+                            Machine_No,
+                            Channel_No,
+                            LAG(TRY_CONVERT(DATETIME, End_Time)) OVER (
+                                PARTITION BY Machine_No, Channel_No 
+                                ORDER BY TRY_CONVERT(DATETIME, Start_Time)
+                            ) AS Prev_End_Time
+                        FROM [Packtester_Utilazation]
+                        WHERE {where_clause}
+                    ),
+                    DailyChannelData AS (
+                        SELECT 
+                            CAST(Start_Time AS DATE) as Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            SUM(Actual_Time) / 3600.0 as Running_Time_Hours,
+                            SUM(CASE 
+                                WHEN Prev_End_Time IS NOT NULL 
+                                THEN DATEDIFF(SECOND, Prev_End_Time, Start_Time)
+                                ELSE 0 
+                            END) / 3600.0 as Idle_Time_Hours
+                        FROM RankedData
+                        WHERE Start_Time IS NOT NULL AND Actual_Time IS NOT NULL
+                        GROUP BY CAST(Start_Time AS DATE), Machine_No, Channel_No
+                    ),
+                    ChannelUtilization AS (
+                        SELECT 
+                            Test_Date,
+                            Machine_No,
+                            Channel_No,
+                            Running_Time_Hours,
+                            Idle_Time_Hours,
+                            CASE 
+                                WHEN (Running_Time_Hours + Idle_Time_Hours) > 0 
+                                THEN (Running_Time_Hours / (Running_Time_Hours + Idle_Time_Hours)) * 100
+                                ELSE 0
+                            END as Channel_Utilization
+                        FROM DailyChannelData
+                    )
+                    SELECT 
+                        CONVERT(VARCHAR, Test_Date, 23) as Test_Date,
+                        Machine_No,
+                        COUNT(DISTINCT Channel_No) as Total_Channels,
+                        ROUND(AVG(Channel_Utilization), 2) as Machine_Utilization_Percentage,
+                        ROUND(SUM(Running_Time_Hours), 2) as Total_Running_Time_Hours,
+                        ROUND(SUM(Idle_Time_Hours), 2) as Total_Idle_Time_Hours,
+                        ROUND(SUM(Running_Time_Hours + Idle_Time_Hours), 2) as Total_Available_Time_Hours
+                    FROM ChannelUtilization
+                    GROUP BY Test_Date, Machine_No
+                    ORDER BY Test_Date DESC, Machine_No
+                """)
+
+                # Execute queries
+                df_detailed = pd.read_sql(query_with_gap, conn, params=params)
+                df_count = pd.read_sql(count_query, conn, params=params)
+                df_channel_stats = pd.read_sql(utilization_stats_query, conn, params=params)
+                df_machine_stats = pd.read_sql(machine_utilization_query, conn, params=params)
+
+                total_count = int(df_count["total"].iloc[0]) if not df_count.empty else 0
+
+                # Format datetime columns for Excel
+                if not df_detailed.empty:
+                    if 'Start_Time' in df_detailed.columns:
+                        df_detailed['Start_Time'] = pd.to_datetime(df_detailed['Start_Time']).dt.strftime(
+                            '%Y-%m-%d %H:%M:%S')
+                    if 'End_Time' in df_detailed.columns:
+                        df_detailed['End_Time'] = pd.to_datetime(df_detailed['End_Time']).dt.strftime(
+                            '%Y-%m-%d %H:%M:%S')
+                    if 'DateTime' in df_detailed.columns:
+                        df_detailed['DateTime'] = pd.to_datetime(df_detailed['DateTime']).dt.strftime(
+                            '%Y-%m-%d %H:%M:%S')
+
+                # Create Excel with multiple sheets
+                with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+                    # Sheet 1: Summary Overview
+                    summary_data = {
+                        "Metric": [
+                            "Total Records",
+                            "Date Range Start",
+                            "Date Range End",
+                            "Total Machines",
+                            "Total Channels"
+                        ],
+                        "Value": [
+                            total_count,
+                            start_date.strftime("%Y-%m-%d %H:%M:%S") if start_date else "All",
+                            end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else "All",
+                            df_detailed['Machine_No'].nunique() if not df_detailed.empty else 0,
+                            df_detailed['Channel_No'].nunique() if not df_detailed.empty else 0
+                        ]
+                    }
+                    df_summary = pd.DataFrame(summary_data)
+                    df_summary.to_excel(writer, sheet_name="Summary", index=False)
+
+                    # Sheet 2: Machine Utilization
+                    if not df_machine_stats.empty:
+                        df_machine_stats.to_excel(writer, sheet_name="Machine_Utilization", index=False)
+                    else:
+                        pd.DataFrame({"Info": ["No machine utilization data available"]}).to_excel(
+                            writer, sheet_name="Machine_Utilization", index=False
+                        )
+
+                    # Sheet 3: Channel Utilization
+                    if not df_channel_stats.empty:
+                        df_channel_stats.to_excel(writer, sheet_name="Channel_Utilization", index=False)
+                    else:
+                        pd.DataFrame({"Info": ["No channel utilization data available"]}).to_excel(
+                            writer, sheet_name="Channel_Utilization", index=False
+                        )
+
+                    # Sheet 4: Detailed Data
+                    if not df_detailed.empty:
+                        df_detailed.to_excel(writer, sheet_name="Detailed_Data", index=False)
+                    else:
+                        pd.DataFrame({"Info": ["No detailed data available for the selected filters"]}).to_excel(
+                            writer, sheet_name="Detailed_Data", index=False
+                        )
+
+                return send_file(filepath, as_attachment=True)
+
+        # For other tables (non-utilization)
+        else:
+            with engine_zone03.connect() as conn:
+                query = text(f"""
+                    SELECT * FROM [{station_table}]
+                    WHERE {where_clause}
+                    ORDER BY [DateTime] DESC
+                """)
+                count_query = text(f"""
+                    SELECT COUNT(*) as total FROM [{station_table}]
+                    WHERE {where_clause}
+                """)
+                status_query = text(f"""
+                    SELECT 
+                        SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) as total_ok,
+                        SUM(CASE WHEN Status = 2 THEN 1 ELSE 0 END) as total_ng
+                    FROM [{station_table}]
+                    WHERE {where_clause}
+                """)
+
+                df = pd.read_sql(query, conn, params=params)
+                dfcount = pd.read_sql(count_query, conn, params=params)
+                dfstats = pd.read_sql(status_query, conn, params=params)
+
+            # Create Excel with statistics
+            with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+                stats_summary = pd.DataFrame({
+                    "Metric": ["Total Count", "Total OK", "Total NG"],
+                    "Value": [
+                        int(dfcount["total"].iloc[0]) if not dfcount.empty else 0,
+                        int(dfstats["total_ok"].iloc[0]) if not dfstats.empty else 0,
+                        int(dfstats["total_ng"].iloc[0]) if not dfstats.empty else 0,
+                    ]
+                })
+
+                if stats_summary.empty:
+                    placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                    placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+                else:
+                    stats_summary.to_excel(writer, sheet_name="Export", index=False, startrow=0)
+
+                    startrow = len(stats_summary) + 3
+                    if df.empty:
+                        placeholder = pd.DataFrame({"Info": ["No data available for the selected filters"]})
+                        placeholder.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+                    else:
+                        df.to_excel(writer, sheet_name="Export", index=False, startrow=startrow)
+
+            return send_file(filepath, as_attachment=True)
 
     except Exception as e:
         print("❌ SQL ERROR (Excel):", e)
         return jsonify({"error": f"Export failed: {e}"}), 500
-
 
 # === Paginated fetch with filters ===
 @app.route("/fetch_data_zone01_ole_oee", methods=["POST"])
@@ -2518,7 +3166,7 @@ def api_combined_statistics():
                 for station in stations:
                     try:
                         # Special handling for certain stations
-                        if station in ["Negative_Temp_Check_Station", "Polarity_Check_Station"]:
+                        if station in ["Negative_Temp_Check_Station"]:
                             query = text(f"""
                                 SELECT
                                     COUNT(ModuleBarcodeData) as total,
@@ -2541,6 +3189,30 @@ def api_combined_statistics():
                                     GROUP BY ModuleBarcodeData
                                 ) grouped
                             """)
+                        elif station in [ "Polarity_Check_Station"]:
+                            query = text(f"""
+                                SELECT
+                                    COUNT(ModuleBarcodeData) as total,
+                                    SUM(CASE WHEN min_status = 1 AND max_status = 1 THEN 1 ELSE 0 END) as total_ok,
+                                    SUM(CASE WHEN max_status = 2 OR min_status = 2 THEN 1 ELSE 0 END) as total_ng,
+                                    AVG(avg_cycle_time_per_module) AS avg_cycle_time
+                                FROM (
+                                    SELECT ModuleBarcodeData,
+                                           MIN(Status01) as min_status,
+                                           MAX(Status01) as max_status,
+                                            AVG(
+                                                CASE 
+                                                    WHEN CycleTime BETWEEN 10 AND 360 
+                                                    THEN CycleTime 
+                                                    ELSE NULL 
+                                                END
+                                            ) AS avg_cycle_time_per_module
+                                    FROM [{station}]
+                                    WHERE [DateTime] BETWEEN :start AND :end
+                                    GROUP BY ModuleBarcodeData
+                                ) grouped
+                            """)
+
                         elif station == "Laser_Welding_Station":
                             query = text(f"""
                                 SELECT 
@@ -2751,7 +3423,8 @@ def export_combined_statistics_worker(task_id, args):
                       COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
                     SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
                     SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
-                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
+                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules,
+                     AVG(M.CycleTime) as avgcytime
                 FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                 WHERE Date_Time BETWEEN :start AND :end
                 """)
@@ -2768,7 +3441,8 @@ def export_combined_statistics_worker(task_id, args):
                     "total": module_stats.get("total_modules", 0),
                     "ok": module_stats.get("ok_modules", 0),
                     "ng": module_stats.get("ng_modules", 0),
-                    "inprogress": module_stats.get("inprogress_modules", 0)
+                    "inprogress": module_stats.get("inprogress_modules", 0),
+                    "avgcytime":module_stats.get("avgcytime",0),
                 }
             }
 
@@ -2982,6 +3656,7 @@ def export_combined_statistics_worker(task_id, args):
             ws.append(["OK Modules", stats_data["modules"]["ok"]])
             ws.append(["NG Modules", stats_data["modules"]["ng"]])
             ws.append(["In Progress Modules", stats_data["modules"]["inprogress"]])
+            ws.append(["Avg cycle time", stats_data["modules"]["avgcytime"]])
 
         elif zone in ["zone2", "zone3"]:
             # Zone 2/3 sheet
@@ -3222,6 +3897,7 @@ def export_combined_statistics_worker(task_id, args):
         EXPORT_TASKS[task_id]["done"] = True
 
     except Exception as e:
+        print(f"Error exporting the data{e}")
         EXPORT_TASKS[task_id]["error"] = str(e)
         EXPORT_TASKS[task_id]["done"] = True
         EXPORT_TASKS[task_id]["progress"] = 100
@@ -3308,7 +3984,8 @@ def export_all_combined_statistics_worker(task_id, args):
                     COUNT(DISTINCT Pallet_Identification_Barcode) AS total_modules,
                     SUM(CASE WHEN M.StoredStatus = 0 THEN 1 ELSE 0 END) as inprogress_modules,
                     SUM(CASE WHEN M.StoredStatus = 1 THEN 1 ELSE 0 END) as ok_modules,
-                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules
+                    SUM(CASE WHEN M.StoredStatus = 2 THEN 1 ELSE 0 END) as ng_modules,
+                    AVG(M.CycleTime) as avgcytime
                 FROM ZONE01_REPORTS.dbo.Module_Formation_Report M
                 WHERE Date_Time BETWEEN :start AND :end
             """)
@@ -3330,6 +4007,8 @@ def export_all_combined_statistics_worker(task_id, args):
         ws1.append(["OK Modules", module_stats.get("ok_modules", 0)])
         ws1.append(["NG Modules", module_stats.get("ng_modules", 0)])
         ws1.append(["In Progress Modules", module_stats.get("inprogress_modules", 0)])
+        ws1.append(["Avg cycle time", module_stats.get("avgcytime", 0)])
+
 
         EXPORT_TASKS[task_id]["progress"] = 30
 

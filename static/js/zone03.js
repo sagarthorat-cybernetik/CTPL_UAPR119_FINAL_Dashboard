@@ -53,7 +53,31 @@ function getFilters() {
      shift:document.getElementById("shift")?.value || ""
   };
 }
+// === Convert seconds to hours with 'hrs' suffix ===
+function formatSecondsToHours(seconds) {
+  if (seconds === null || seconds === undefined || seconds === "") return "";
+  const numSeconds = parseFloat(seconds);
+  if (isNaN(numSeconds)) return seconds;
 
+  const hours = numSeconds / 3600;
+  return `${hours.toFixed(2)} hrs`;
+}
+
+// === Format value based on column name ===
+function formatCellValue(columnName, value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  // Check for time-related columns and convert if needed
+  const timeColumns = ["step_timing", "cycle_time", "Step_Timing", "Cycle_Time", "StepTime", "CycleTime"];
+  if (timeColumns.some(col => columnName.toLowerCase() === col.toLowerCase())) {
+    // Check if the value is numeric (seconds)
+    if (typeof value === 'number' || !isNaN(parseFloat(value))) {
+      return formatSecondsToHours(value);
+    }
+  }
+
+  return value;
+}
 // === Load paginated data ===
 async function loadPage(page = 1) {
   const f = getFilters();
@@ -90,6 +114,7 @@ async function loadPage(page = 1) {
 
     state.page = result.page || 1;
     state.totalPages = result.pages || 1;
+//    console.log(result)
     rendersummary(result.total || 0, result.total_ok || 0, result.total_ng || 0);
     renderTable(result.data || [], result.columns || []);
     renderPageInfo();
@@ -137,7 +162,9 @@ function renderTable(data, columns) {
         const tr = document.createElement("tr");
         columns.forEach(col => {
             const td = document.createElement("td");
-            td.textContent = row[col] !== null ? row[col] : "";
+            // Format the cell value based on column name
+              const rawValue = row[col] !== null ? row[col] : "";
+              td.textContent = formatCellValue(col, rawValue);
             tr.appendChild(td);
         });
         tbody.appendChild(tr);
